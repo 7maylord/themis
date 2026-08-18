@@ -36,3 +36,6 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+
+      - name: Run Forge risk math fuzz suite
+        run: forge test --fuzz-runs 10000 --match-path "test/ThemisRisk.t.sol"
