@@ -34,8 +34,14 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     uint24 public maxPremiumPpm = 2500;
     uint256 public volFullScaleBps = 300;
     uint256 public sizeFullScaleBps = 500;
-    uint256 public impactFullScaleBps = 300;
-    uint256 public flowFullScale = 6000;
+    // Lower than a single large swap's own raw impact (deliberately — impact is now
+    // block-accumulated, and a split attack's EWMA-folded history sits well under a
+    // threshold tuned for one swap's raw move; this gives the folded signal room to
+    // register instead of reading as near-zero next to an already-saturated single swap).
+    uint256 public impactFullScaleBps = 100;
+    // 5x a single swap's BPS(10000) sample: one swap doesn't saturate flow (leaves
+    // room to show it rising), but ~5 swaps in one block does (splitting defense).
+    uint256 public flowFullScale = 50_000;
 
     // Flow-intensity tuning (spec §9.7 swap-splitting resistance). Not owner-adjustable
     // yet — Task 6 tunes these against the adversarial suite; add setters then if needed.
@@ -43,6 +49,17 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     uint256 internal constant FLOW_DECAY_PER_BLOCK_BPS = 2000;
 
     uint256 internal constant SWAP_FEE_DENOMINATOR = 1_000_000;
+
+    // Volatility's EWMA is stored at this internal precision, not raw bps: once a
+    // raw-bps integer value shrinks into single digits (a calm pool, or several
+    // decay steps after a spike), any further update floors to 0 permanently
+    // regardless of the true fractional value — precision lost, not signal decayed.
+    // Scaling the internal representation up keeps rounding error negligible;
+    // normalize() only ever sees the descaled value. (Tried lowering alphaBps
+    // instead, to resist wash-trading specifically — reverted; see
+    // docs/THREAT_MODEL.md for why that doesn't work and this fix stands on its
+    // own as a general correctness improvement regardless.)
+    uint256 internal constant VOL_PRECISION = 1e6;
 
     constructor(IPoolManager _poolManager, FairShareVault _vault, address owner_)
         BaseHook(_poolManager)
@@ -78,12 +95,14 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
 
     /// @notice Estimates risk for a proposed trade against current pool state.
     /// @dev Forecasts the trade's own price move with a no-tick-crossing closed-form
-    ///      estimate (mirrors SwapMath's fee deduction before price movement), then
-    ///      feeds that single `sample` into both impact (direct) and volatility (EWMA)
-    ///      — exactly how _updateRiskState derives both scores from one real sample
-    ///      for an actual swap, so the two paths can't drift apart. Flow intensity
-    ///      uses current state since this swap's own arrival can't be foreseen;
-    ///      see test_previewRisk_* for the resulting tolerance.
+    ///      estimate (mirrors SwapMath's fee deduction before price movement). Impact
+    ///      and size are forecast through the same block-accumulator this swap would
+    ///      actually hit. Volatility compares against lastVolSqrtPrice instead of the
+    ///      estimate's own baseline — a DIFFERENT reference whenever volatility hasn't
+    ///      fired on the most recent swap — exactly mirroring _updateRiskState's own
+    ///      distinction between the two. Flow intensity uses current state since this
+    ///      swap's own arrival can't be foreseen; see test_previewRisk_* for the
+    ///      resulting tolerance.
     function previewRisk(PoolId poolId, bool zeroForOne, int256 amountSpecified)
         external
         view
@@ -95,20 +114,50 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
 
         uint160 estimatedNextSqrtPrice =
             _estimateNextSqrtPrice(currentSqrtPrice, liquidity, lpFee, zeroForOne, amountSpecified);
-        uint256 sample = ThemisRisk.priceReturnBps(currentSqrtPrice, estimatedNextSqrtPrice);
 
-        uint32 impactScore = ThemisRisk.normalize(sample, impactFullScaleBps);
-        uint32 sizeScore = _sizeScore(amountSpecified, liquidity);
-
-        uint32 volatilityScore = st.volatilityScore;
-        if (st.lastSqrtPrice != 0 && block.number > st.lastUpdatedBlock) {
-            volatilityScore = ThemisRisk.normalize(ThemisRisk.ewma(st.volBps, sample, alphaBps), volFullScaleBps);
-        }
+        uint32 impactScore = _forecastImpactScore(st, currentSqrtPrice, estimatedNextSqrtPrice);
+        uint32 sizeScore = _forecastSizeScore(st, amountSpecified, liquidity);
+        uint32 volatilityScore = _forecastVolatilityScore(st, estimatedNextSqrtPrice);
 
         uint32 score = ThemisRisk.composite(volatilityScore, sizeScore, impactScore, st.flowScore);
         regime = ThemisRisk.nextRegime(score, st.regime);
         premium = ThemisRisk.premiumPpm(score, maxPremiumPpm);
         riskScore = score;
+    }
+
+    function _forecastImpactScore(RiskState memory st, uint160 currentSqrtPrice, uint160 estimatedNextSqrtPrice)
+        internal
+        view
+        returns (uint32)
+    {
+        uint256 sample = ThemisRisk.priceReturnBps(currentSqrtPrice, estimatedNextSqrtPrice);
+        (,, uint256 liveBps) =
+            _nextBlockAccumulatedEwma(st.impactEwmaBps, st.blockImpactBps, st.lastUpdatedBlock, sample);
+        return ThemisRisk.normalize(liveBps, impactFullScaleBps);
+    }
+
+    function _forecastSizeScore(RiskState memory st, int256 amountSpecified, uint128 liquidity)
+        internal
+        view
+        returns (uint32)
+    {
+        (,, uint256 liveBps) = _nextBlockAccumulatedEwma(
+            st.sizeEwmaBps, st.blockSizeBps, st.lastUpdatedBlock, _notionalRatioBps(amountSpecified, liquidity)
+        );
+        return ThemisRisk.normalize(liveBps, sizeFullScaleBps);
+    }
+
+    function _forecastVolatilityScore(RiskState memory st, uint160 estimatedNextSqrtPrice)
+        internal
+        view
+        returns (uint32)
+    {
+        if (st.lastVolSqrtPrice == 0 || block.number <= st.lastUpdatedBlock) {
+            return st.volatilityScore;
+        }
+        uint256 sample = _scaleVolSample(ThemisRisk.priceReturnBps(st.lastVolSqrtPrice, estimatedNextSqrtPrice));
+        uint256 newVolBps = ThemisRisk.ewma(st.volBps, sample, alphaBps);
+        return ThemisRisk.normalize(newVolBps / VOL_PRECISION, volFullScaleBps);
     }
 
     // ─── Swap lifecycle ─────────────────────────────────────────────────────────
@@ -181,29 +230,12 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
         uint128 liquidity = poolManager.getLiquidity(poolId);
 
-        // One raw sample drives both impact and volatility below — priceReturnBps
-        // already returns 0 when st.lastSqrtPrice is 0 (first-ever swap), so both
-        // derived scores correctly come out 0 with no extra guard needed here.
-        uint256 sample = ThemisRisk.priceReturnBps(st.lastSqrtPrice, sqrtPriceX96);
-
-        // Impact: this swap's own realized move, every swap (not block-capped) —
-        // it measures what already happened, so there's nothing to game by spamming.
-        uint32 impactScore = ThemisRisk.normalize(sample, impactFullScaleBps);
-
-        // Volatility: EWMA of the same sample, capped to once per block (spec §9.7)
-        // so an attacker can't spike-and-revert price within one block to game the regime.
-        if (st.lastSqrtPrice != 0 && block.number > st.lastUpdatedBlock) {
-            uint256 newVolBps = ThemisRisk.ewma(st.volBps, sample, alphaBps);
-            uint32 newVolScore = ThemisRisk.normalize(newVolBps, volFullScaleBps);
-            emit VolatilityUpdated(poolId, st.volatilityScore, newVolScore);
-            st.volBps = uint64(newVolBps);
-            st.volatilityScore = newVolScore;
-        }
-
-        uint32 sizeScore = _sizeScore(amountSpecified, liquidity);
-
-        st.flowEwmaBps = uint64(_nextFlowBps(st.flowEwmaBps, st.lastUpdatedBlock));
-        st.flowScore = ThemisRisk.normalize(st.flowEwmaBps, flowFullScale);
+        uint32 impactScore;
+        (st, impactScore) = _updateImpact(st, sqrtPriceX96);
+        st = _updateVolatility(st, poolId, sqrtPriceX96);
+        st = _updateFlow(st);
+        uint32 sizeScore;
+        (st, sizeScore) = _updateSize(st, amountSpecified, liquidity);
 
         uint32 previousScore = st.riskScore;
         newScore = ThemisRisk.composite(st.volatilityScore, sizeScore, impactScore, st.flowScore);
@@ -219,23 +251,124 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         emit RiskUpdated(poolId, previousScore, newScore, newRegime);
     }
 
-    /// @dev O(1) decay by block gap, then EWMA toward "a swap just happened". Rises
-    ///      with swaps-per-block, which is exactly the split-swap signal (spec §9.7).
-    function _nextFlowBps(uint64 prevFlowBps, uint64 lastUpdatedBlock) internal view returns (uint256) {
-        uint256 gap = lastUpdatedBlock == 0 ? 0 : block.number - lastUpdatedBlock;
-        uint256 decayedFlow = gap == 0
-            ? prevFlowBps
-            : FullMath.mulDiv(prevFlowBps, ThemisRisk.BPS, ThemisRisk.BPS + gap * FLOW_DECAY_PER_BLOCK_BPS);
-        return ThemisRisk.ewma(decayedFlow, ThemisRisk.BPS, FLOW_ALPHA_BPS);
+    /// @dev This swap's own realized move against the PER-SWAP baseline
+    ///      (priceReturnBps already returns 0 when st.lastSqrtPrice is 0 on the
+    ///      first-ever swap, no extra guard needed), block-accumulated like size so
+    ///      splitting a trade can't make each chunk's own tiny move erase the signal.
+    function _updateImpact(RiskState memory st, uint160 sqrtPriceX96)
+        internal
+        view
+        returns (RiskState memory, uint32 impactScore)
+    {
+        uint256 sample = ThemisRisk.priceReturnBps(st.lastSqrtPrice, sqrtPriceX96);
+        uint256 liveBps;
+        (st.impactEwmaBps, st.blockImpactBps, liveBps) =
+            _nextBlockAccumulatedEwma(st.impactEwmaBps, st.blockImpactBps, st.lastUpdatedBlock, sample);
+        impactScore = ThemisRisk.normalize(liveBps, impactFullScaleBps);
+        return (st, impactScore);
+    }
+
+    /// @dev EWMA against the PER-UPDATE baseline (lastVolSqrtPrice), capped to once
+    ///      per block (spec §9.7 spike-revert guard). Using lastSqrtPrice here instead
+    ///      would mean a once-per-block update only ever sees the single most recent
+    ///      swap's move — comparing against a baseline that only moves when volatility
+    ///      itself fires is what makes the sample capture the FULL cumulative move
+    ///      since the last update, whether that came from one swap or twenty.
+    function _updateVolatility(RiskState memory st, PoolId poolId, uint160 sqrtPriceX96)
+        internal
+        returns (RiskState memory)
+    {
+        if (st.lastVolSqrtPrice == 0) {
+            st.lastVolSqrtPrice = sqrtPriceX96; // first-ever swap: establish baseline only
+            return st;
+        }
+        if (block.number > st.lastUpdatedBlock) {
+            uint256 sample = _scaleVolSample(ThemisRisk.priceReturnBps(st.lastVolSqrtPrice, sqrtPriceX96));
+            uint256 newVolBps = ThemisRisk.ewma(st.volBps, sample, alphaBps);
+            uint32 newVolScore = ThemisRisk.normalize(newVolBps / VOL_PRECISION, volFullScaleBps);
+            emit VolatilityUpdated(poolId, st.volatilityScore, newVolScore);
+            st.volBps = uint64(newVolBps);
+            st.volatilityScore = newVolScore;
+            st.lastVolSqrtPrice = sqrtPriceX96;
+        }
+        return st;
+    }
+
+    /// @dev priceReturnBps can (rarely) return type(uint256).max — see its own H-1
+    ///      overflow guard for extreme tick-range moves. Multiplying that by
+    ///      VOL_PRECISION would overflow and revert, reintroducing exactly the
+    ///      DoS risk that guard exists to prevent, so cap before scaling instead.
+    function _scaleVolSample(uint256 rawBps) internal pure returns (uint256) {
+        return rawBps > type(uint256).max / VOL_PRECISION ? type(uint256).max : rawBps * VOL_PRECISION;
+    }
+
+    function _updateFlow(RiskState memory st) internal view returns (RiskState memory) {
+        uint256 liveBps;
+        (st.flowEwmaBps, st.blockFlowBps, liveBps) =
+            _nextBlockAccumulatedEwma(st.flowEwmaBps, st.blockFlowBps, st.lastUpdatedBlock, ThemisRisk.BPS);
+        st.flowScore = ThemisRisk.normalize(liveBps, flowFullScale);
+        return st;
+    }
+
+    function _updateSize(RiskState memory st, int256 amountSpecified, uint128 liquidity)
+        internal
+        view
+        returns (RiskState memory, uint32 sizeScore)
+    {
+        uint256 liveBps;
+        (st.sizeEwmaBps, st.blockSizeBps, liveBps) = _nextBlockAccumulatedEwma(
+            st.sizeEwmaBps, st.blockSizeBps, st.lastUpdatedBlock, _notionalRatioBps(amountSpecified, liquidity)
+        );
+        sizeScore = ThemisRisk.normalize(liveBps, sizeFullScaleBps);
+        return (st, sizeScore);
+    }
+
+    /// @dev Shared by flow (sample = constant BPS, a pure "a swap happened" signal —
+    ///      wash-trading resistance depends on a tiny swap counting for as much as a
+    ///      large one) and size (sample = this swap's own notional ratio — splitting
+    ///      resistance depends on small chunks summing back to the same total a
+    ///      single big swap would produce). Either way, a pure EWMA can't resist
+    ///      splitting: repeated samples converge toward the sample, not their sum —
+    ///      no alpha fixes that. So the sample is SUMMED within a block
+    ///      (blockBps) and only folded into the smoothed ewmaBps history at a block
+    ///      boundary — many chunks in one block correctly reads as high intensity,
+    ///      while cross-block manipulation still goes through the resistant EWMA fold.
+    /// @return newEwmaBps settled history, written to storage
+    /// @return newBlockBps this block's running total, written to storage
+    /// @return liveBps the larger of the two — what THIS swap's own score should use,
+    ///         so a mid-block accumulation is reflected immediately, not just next block
+    function _nextBlockAccumulatedEwma(uint64 prevEwmaBps, uint64 prevBlockBps, uint64 lastUpdatedBlock, uint256 sample)
+        internal
+        view
+        returns (uint64 newEwmaBps, uint64 newBlockBps, uint256 liveBps)
+    {
+        if (lastUpdatedBlock == block.number) {
+            newEwmaBps = prevEwmaBps;
+            newBlockBps = uint64(_capToUint64(uint256(prevBlockBps) + sample));
+        } else {
+            uint256 gap = lastUpdatedBlock == 0 ? 0 : block.number - lastUpdatedBlock;
+            uint256 decayed = gap <= 1
+                ? prevEwmaBps
+                : FullMath.mulDiv(prevEwmaBps, ThemisRisk.BPS, ThemisRisk.BPS + (gap - 1) * FLOW_DECAY_PER_BLOCK_BPS);
+            newEwmaBps = uint64(ThemisRisk.ewma(decayed, prevBlockBps, FLOW_ALPHA_BPS));
+            newBlockBps = uint64(_capToUint64(sample));
+        }
+
+        liveBps = newBlockBps > newEwmaBps ? newBlockBps : newEwmaBps;
+    }
+
+    function _capToUint64(uint256 v) internal pure returns (uint256) {
+        return v > type(uint64).max ? type(uint64).max : v;
     }
 
     // ─── Internal risk math glue ────────────────────────────────────────────────
 
-    function _sizeScore(int256 amountSpecified, uint128 liquidity) internal view returns (uint32) {
+    /// @dev Shared by size scoring and the flow accumulator so splitting a trade
+    ///      into many small pieces can't defeat either dimension on its own.
+    function _notionalRatioBps(int256 amountSpecified, uint128 liquidity) internal pure returns (uint256) {
         if (liquidity == 0) return 0;
         uint256 absAmount = amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified);
-        uint256 ratioBps = FullMath.mulDiv(absAmount, ThemisRisk.BPS, liquidity);
-        return ThemisRisk.normalize(ratioBps, sizeFullScaleBps);
+        return FullMath.mulDiv(absAmount, ThemisRisk.BPS, liquidity);
     }
 
     /// @dev No-tick-crossing closed-form estimate of the price a proposed trade would

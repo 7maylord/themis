@@ -51,9 +51,21 @@ library ThemisRisk {
     }
 
     /// @notice Exponentially weighted moving average (spec §9.5).
+    /// @dev The exact combined formula is used whenever it's safe (both inputs fit
+    ///      uint128, so `alphaBps(<=BPS) * value` can never approach uint256's limit)
+    ///      — this is the path every realistic caller and the fuzz suite hits, and it
+    ///      keeps the result exactly within [min(prevBps,sampleBps), max(...)]. Only
+    ///      the rare extreme case (sampleBps can be type(uint256).max — see
+    ///      priceReturnBps's own H-1 overflow guard) falls back to two separate
+    ///      mulDiv calls, which are overflow-safe but lose up to ~1 unit each to
+    ///      double rounding — negligible at that magnitude, and strictly better than
+    ///      the revert a raw `alphaBps * sampleBps` would hit instead.
     function ewma(uint256 prevBps, uint256 sampleBps, uint256 alphaBps) internal pure returns (uint256) {
         if (alphaBps > BPS) alphaBps = BPS;
-        return (alphaBps * sampleBps + (BPS - alphaBps) * prevBps) / BPS;
+        if (sampleBps <= type(uint128).max && prevBps <= type(uint128).max) {
+            return (alphaBps * sampleBps + (BPS - alphaBps) * prevBps) / BPS;
+        }
+        return FullMath.mulDiv(alphaBps, sampleBps, BPS) + FullMath.mulDiv(BPS - alphaBps, prevBps, BPS);
     }
 
     /// @notice Linear map of a bps quantity onto [0, 100], clamped at fullScale.

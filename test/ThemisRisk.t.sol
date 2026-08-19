@@ -44,6 +44,16 @@ contract ThemisRiskTest is Test {
         assertLt(v, 1_200);
     }
 
+    /// WHY: sampleBps can legitimately be type(uint256).max — priceReturnBps's own
+    /// H-1 overflow guard returns exactly that for extreme tick-range moves. A raw
+    /// `alphaBps * sampleBps` would overflow and revert; this pins that it doesn't.
+    function test_ewma_extremeSampleDoesNotRevert() public pure {
+        uint256 v = ThemisRisk.ewma(1000, type(uint256).max, 9999);
+        assertGt(v, 0);
+        uint256 v2 = ThemisRisk.ewma(1000, type(uint256).max, ThemisRisk.BPS);
+        assertEq(v2, type(uint256).max);
+    }
+
     function test_normalize_clampsAtFullScale() public pure {
         assertEq(ThemisRisk.normalize(5_000, 1_000), 100);
         assertEq(ThemisRisk.normalize(0, 1_000), 0);
