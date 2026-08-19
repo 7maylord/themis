@@ -2,6 +2,7 @@
 @eth-optimism-bedrock/=lib/v4-hooks-public/lib/protocol-fees/lib/optimism/packages/contracts-bedrock/
 @nomad-xyz/=lib/v4-hooks-public/lib/slipstream/lib/ExcessivelySafeCall/
 @openzeppelin/contracts/=lib/v4-hooks-public/lib/openzeppelin-contracts/contracts/
+@openzeppelin/uniswap-hooks/=lib/uniswap-hooks/
 @pancakeswap/v3-core/=lib/v4-hooks-public/lib/pancake-v3-contracts/projects/v3-core/contracts/
 @protocol-fees/=lib/v4-hooks-public/lib/protocol-fees/src/
 @solidity-parser/=lib/v4-hooks-public/lib/slipstream/node_modules/solhint/node_modules/@solidity-parser/
