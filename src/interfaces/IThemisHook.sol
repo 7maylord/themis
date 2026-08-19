@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
 /// @title IThemisHook
 interface IThemisHook {
@@ -26,6 +27,8 @@ interface IThemisHook {
     );
 
     event VolatilityUpdated(PoolId indexed poolId, uint32 previousVolatility, uint32 newVolatility);
+
+    event RiskPremiumDiverted(PoolId indexed poolId, Currency currency, uint256 amount, uint32 riskScore);
 
     function getRiskState(PoolId poolId) external view returns (RiskState memory);
 

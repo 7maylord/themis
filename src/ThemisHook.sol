@@ -8,6 +8,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {SqrtPriceMath} from "@uniswap/v4-core/src/libraries/SqrtPriceMath.sol";
 import {FullMath} from "@uniswap/v4-core/src/libraries/FullMath.sol";
@@ -20,8 +21,8 @@ import {FairShareVault} from "./FairShareVault.sol";
 import {IThemisHook} from "./interfaces/IThemisHook.sol";
 
 /// @title ThemisHook
-/// @notice Tracks per-pool MEV risk state and exposes it via previewRisk. Risk-premium
-///         diversion into FairShareVault is added on top of this in a later commit.
+/// @notice Tracks per-pool MEV risk state via previewRisk, and diverts a risk-scaled
+///         premium from elevated-risk swaps into FairShareVault for LPs.
 contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     using StateLibrary for IPoolManager;
 
@@ -78,11 +79,11 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     /// @notice Estimates risk for a proposed trade against current pool state.
     /// @dev Forecasts the trade's own price move with a no-tick-crossing closed-form
     ///      estimate (mirrors SwapMath's fee deduction before price movement), then
-    ///      feeds that single sample into both impact (direct) and volatility (EWMA)
-    ///      exactly as _updateRiskState does for a real swap — see _rawSample's
-    ///      doc for why sharing the sample, not just the formula, matters. Flow
-    ///      intensity uses current state since this swap's own arrival can't be
-    ///      foreseen; see test_previewRisk_* for the resulting tolerance.
+    ///      feeds that single `sample` into both impact (direct) and volatility (EWMA)
+    ///      — exactly how _updateRiskState derives both scores from one real sample
+    ///      for an actual swap, so the two paths can't drift apart. Flow intensity
+    ///      uses current state since this swap's own arrival can't be foreseen;
+    ///      see test_previewRisk_* for the resulting tolerance.
     function previewRisk(PoolId poolId, bool zeroForOne, int256 amountSpecified)
         external
         view
@@ -112,19 +113,61 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
 
     // ─── Swap lifecycle ─────────────────────────────────────────────────────────
 
+    /// @dev Not whenNotPaused: pausing stops value movement (the diversion below,
+    ///      gated on !paused() in _divertPremium), not risk telemetry. A paused hook
+    ///      must degrade to a vanilla pool, never brick swaps.
     function _afterSwap(
         address sender,
         PoolKey calldata key,
         SwapParams calldata params,
-        BalanceDelta, /* swapDelta — used once premium diversion lands on top of this */
+        BalanceDelta swapDelta,
         bytes calldata
-    ) internal override whenNotPaused returns (bytes4, int128) {
+    ) internal override returns (bytes4, int128) {
         PoolId poolId = key.toId();
         (uint32 newScore, uint8 newRegime) = _updateRiskState(poolId, params.amountSpecified);
 
         emit ThemisSwapObserved(poolId, sender, params.amountSpecified, newScore, newRegime);
 
-        return (BaseHook.afterSwap.selector, 0);
+        int128 hookDelta = _divertPremium(poolId, key, params, swapDelta, newScore);
+
+        return (BaseHook.afterSwap.selector, hookDelta);
+    }
+
+    /// @dev Split out to keep _afterSwap's stack shallow (this repo pins via_ir = false).
+    ///      Charges the risk premium in the swap's unspecified currency: less output
+    ///      on exact-input, more input on exact-output (see Hooks.afterSwap's
+    ///      `swapDelta = swapDelta - hookDelta`, which returning +premium exploits
+    ///      identically in both directions — no branch-specific sign flip needed).
+    ///      The router's amountOutMinimum/amountInMaximum still bounds the trader,
+    ///      so no separate slippage guard is needed here.
+    function _divertPremium(
+        PoolId poolId,
+        PoolKey calldata key,
+        SwapParams calldata params,
+        BalanceDelta swapDelta,
+        uint32 riskScore
+    ) internal returns (int128) {
+        if (paused()) return 0;
+
+        uint24 ppm = ThemisRisk.premiumPpm(riskScore, maxPremiumPpm);
+        if (ppm == 0) return 0;
+
+        bool exactInput = params.amountSpecified < 0;
+        bool unspecifiedIsCurrency1 = (params.zeroForOne == exactInput);
+
+        Currency premiumCurrency = unspecifiedIsCurrency1 ? key.currency1 : key.currency0;
+        int128 unspecifiedDelta = unspecifiedIsCurrency1 ? swapDelta.amount1() : swapDelta.amount0();
+
+        uint256 notional = unspecifiedDelta > 0 ? uint256(int256(unspecifiedDelta)) : uint256(-int256(unspecifiedDelta));
+        uint256 premium = FullMath.mulDiv(notional, ppm, SWAP_FEE_DENOMINATOR);
+        if (premium == 0) return 0;
+
+        emit RiskPremiumDiverted(poolId, premiumCurrency, premium, riskScore);
+
+        poolManager.take(premiumCurrency, address(vault), premium);
+        vault.credit(poolId, premiumCurrency, premium);
+
+        return int128(uint128(premium));
     }
 
     /// @dev Split out of _afterSwap to keep the stack shallow enough for the
