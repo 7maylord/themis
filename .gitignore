@@ -12,3 +12,7 @@ out/
 
 # Dotenv file
 .env
+
+# Medusa fuzzing corpus and coverage reports — regenerable, not source
+corpus/
+crytic-export/

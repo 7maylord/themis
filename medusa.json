@@ -12,7 +12,7 @@
     "coverageFormats": ["html", "lcov"],
     "coverageExclusions": [],
     "revertReporterEnabled": false,
-    "targetContracts": ["MedusaMathTest", "MedusaVaultTest"],
+    "targetContracts": ["MedusaThemisRiskTest", "MedusaThemisVaultTest"],
     "predeployedContracts": {},
     "targetContractsBalances": [],
     "constructorArgs": {},

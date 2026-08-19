@@ -68,11 +68,23 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
     /// @notice Credit the pool's vault with diverted risk premium.
     ///         Accounting only — the hook has already moved tokens into this
     ///         contract via poolManager.take() before calling this function.
+    /// @dev For native ETH specifically, that take() call physically arrives via a
+    ///      raw `call{value}` (see Currency.transfer), which is the exact same
+    ///      mechanism receive() handles — so by the time credit() runs, this amount
+    ///      has already landed in unattributedEth and totalReceived once. Crediting
+    ///      it again there would double-count real ETH that only exists once; net
+    ///      it out of unattributedEth instead (mirrors attributeEth's same move),
+    ///      and skip totalReceived for the native case. ERC-20 has no such callback,
+    ///      so credit() remains the first and only place its total is recorded.
     function credit(PoolId poolId, Currency currency, uint256 amount) external onlyHook whenNotPaused {
         if (amount == 0) return;
         if (!poolRegistered[poolId]) revert PoolNotRegistered();
+        if (Currency.unwrap(currency) == address(0)) {
+            unattributedEth -= amount;
+        } else {
+            totalReceived[currency] += amount;
+        }
         pendingForPool[poolId][currency] += amount;
-        totalReceived[currency] += amount;
         emit FairShareCredited(poolId, currency, amount);
     }
 

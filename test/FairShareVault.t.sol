@@ -103,6 +103,28 @@ contract FairShareVaultTest is BaseTest {
         assertEq(vault.totalReceived(currency1), 150);
     }
 
+    /// WHY: poolManager.take() for native currency physically arrives via a raw
+    /// call{value} (Currency.transfer), which triggers receive() exactly like any
+    /// other ETH transfer — before credit() ever runs. Found by
+    /// test/Themis.invariant.t.sol: crediting the native amount again on top of
+    /// what receive() already recorded double-counted real ETH that only exists once.
+    function test_credit_nativeCurrency_doesNotDoubleCountWithReceive() public {
+        // Mirrors exactly what the hook's _divertPremium does: take() moves the
+        // ETH in first (receive() fires), then credit() records the attribution.
+        (bool ok,) = address(vault).call{value: 1 ether}("");
+        assertTrue(ok);
+        assertEq(vault.unattributedEth(), 1 ether);
+
+        vault.credit(poolId, CurrencyLibrary.ADDRESS_ZERO, 1 ether);
+
+        assertEq(vault.unattributedEth(), 0);
+        assertEq(vault.pendingForPool(poolId, CurrencyLibrary.ADDRESS_ZERO), 1 ether);
+        assertEq(vault.totalReceived(CurrencyLibrary.ADDRESS_ZERO), 1 ether);
+        assertEq(
+            vault.pendingForPool(poolId, CurrencyLibrary.ADDRESS_ZERO) + vault.unattributedEth(), address(vault).balance
+        );
+    }
+
     // ─── attributeEth() ─────────────────────────────────────────────────────────
 
     function test_attributeEth_movesUnattributedToPool() public {

@@ -1,9 +1,40 @@
 # Themis Threat Model
 
-This document is built incrementally as the build surfaces real findings, per
-`docs/superpowers/plans/2026-08-17-themis.md` Task 6 Step 3. Task 13 covers spec §26
-in full; this section is the risk-manipulation record from Task 6's adversarial suite
-(`test/AdversarialFlow.t.sol`).
+This document is built incrementally as the build surfaces real findings. Task 13
+covers spec §26 in full; the sections below are what Tasks 6 and 7 actually found.
+
+## Vault accounting: native-currency double-counting (found by Task 7's invariant suite)
+
+`FairShareVault.credit()` was documented as "accounting only — the hook has already
+moved tokens into this contract via `poolManager.take()`," which is true and safe
+for ERC-20 (a plain `transfer`, no callback into the recipient). It is **not** true
+for native ETH: `Currency.transfer`'s native-currency branch is a raw
+`call{value: amount}("")`, which — because the recipient is a contract with a
+`receive()` — is the exact same trigger `receive()` itself handles for any other ETH
+transfer. So by the time `credit()` ran for a native-currency premium diversion, that
+ETH had already been counted once by `receive()` (into `unattributedEth` and
+`totalReceived`), and `credit()` counted it a second time (into `pendingForPool`) —
+real ETH recorded as existing twice.
+
+`test/Themis.invariant.t.sol:invariant_vaultAccountingNeverExceedsBalance` caught
+this within the first fuzzing run: `pendingForPool + unattributedEth` exceeded the
+vault's actual ETH balance by exactly 2× on the native-premium path. Confirmed
+independently by `test/medusa/MedusaThemisVault.sol`'s
+`property_nativeAccountingMatchesBalance` and `property_creditedMatchesGhostTotal`.
+
+Fixed in `src/FairShareVault.sol`: `credit()` now nets native-currency amounts out
+of `unattributedEth` (mirroring what `attributeEth()` already does for the same
+underlying operation — moving ETH from "unattributed" to "pool-specific") instead of
+adding to `pendingForPool` on top of an already-counted arrival, and skips
+`totalReceived` for the native case since `receive()` already recorded it. ERC-20 is
+unaffected — `credit()` remains the first and only place its total is recorded.
+Regression test: `test/FairShareVault.t.sol:test_credit_nativeCurrency_doesNotDoubleCountWithReceive`.
+
+This is exactly the class of bug Task 7's invariant suite exists to find: real,
+non-obvious, would not have been caught by any of the directional unit tests in
+Tasks 3 or 5 (which check `credit()` and `receive()` individually, never the
+specific sequence `take()` → `receive()` → `credit()` that only happens together
+during a live native-currency premium diversion).
 
 ## Risk manipulation (spec §9.7)
 
