@@ -5,7 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {IPermit2} from "permit2/src/interfaces/IPermit2.sol";
@@ -19,10 +19,13 @@ import {Deployers} from "test/utils/Deployers.sol";
 ///         Token and hook addresses are read from environment variables so no Solidity
 ///         edits are needed between deployments.
 ///
-///   TOKEN0_ADDRESS   — address of the first ERC-20 token (Themis pools use native ETH
-///                      as currency0; see Task 8, which reworks getCurrencies() below)
-///   TOKEN1_ADDRESS   — address of the second ERC-20 token
-///   HOOK_ADDRESS     — deployed ThemisHook address (set after 00_DeployThemis runs)
+///   TOKEN1_ADDRESS   — address of the ERC-20 paired against native ETH. There is no
+///                      TOKEN0_ADDRESS: Themis pools always use native ETH as
+///                      currency0 (see getCurrencies() below) — token0 stays
+///                      declared (unset, address(0)) purely because LiquidityHelpers
+///                      is shared infrastructure that already guards on
+///                      currency0.isAddressZero() before ever touching it.
+///   THEMIS_HOOK_ADDRESS — deployed ThemisHook address (set after 00_DeployThemis runs)
 contract BaseScript is Script, Deployers {
     address immutable deployerAddress;
 
@@ -36,7 +39,7 @@ contract BaseScript is Script, Deployers {
     constructor() {
         token0       = IERC20(vm.envOr("TOKEN0_ADDRESS", address(0)));
         token1       = IERC20(vm.envOr("TOKEN1_ADDRESS", address(0)));
-        hookContract = IHooks(vm.envOr("HOOK_ADDRESS",   address(0)));
+        hookContract = IHooks(vm.envOr("THEMIS_HOOK_ADDRESS", address(0)));
 
         // Make sure artifacts are available, either deploy or configure.
         deployArtifacts();
@@ -64,15 +67,8 @@ contract BaseScript is Script, Deployers {
     }
 
     function getCurrencies() internal view returns (Currency, Currency) {
-        require(address(token0) != address(0),    "TOKEN0_ADDRESS not set");
-        require(address(token1) != address(0),    "TOKEN1_ADDRESS not set");
-        require(address(token0) != address(token1), "tokens must differ");
-
-        if (token0 < token1) {
-            return (Currency.wrap(address(token0)), Currency.wrap(address(token1)));
-        } else {
-            return (Currency.wrap(address(token1)), Currency.wrap(address(token0)));
-        }
+        require(address(token1) != address(0), "TOKEN1_ADDRESS not set");
+        return (CurrencyLibrary.ADDRESS_ZERO, Currency.wrap(address(token1)));
     }
 
     function getDeployer() internal returns (address) {

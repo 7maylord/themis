@@ -1,0 +1,11 @@
+{
+  "chainId": 11155111,
+  "poolManager": "0xE03A1074c86CFeDd5C142C4F04F1a1536e203543",
+  "hook": "0xa4FC05B84A363c5118E2454D3c1E15aBB0FA0044",
+  "vault": "0x9F0d36DFf418195F767763B17B5D9E5782D74ED0",
+  "poolId": "0x10ac9ee266c2bbd419011b1bd6d423803a466ed2df6bf75f15ce375b327e5a62",
+  "permissionBitmap": 68,
+  "deploymentTx": "0x65b2e26586740aa48656b652aa4949319d76fac5ccd9e35cd10ab297dde042c0",
+  "blockNumber": 11531145,
+  "commitSha": "ecac31cc619a0a6a253e12dbda2f1054673c3413"
+}
