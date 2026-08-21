@@ -37,6 +37,15 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.ewma(500, 9000, 0), 500);
     }
 
+    /// WHY: no current caller ever passes alpha > BPS (ThemisHook.setAlphaBps and
+    /// the FLOW_ALPHA_BPS constant both stay within bounds by construction), so this
+    /// clamp was never exercised by anything else. It's still load-bearing defense —
+    /// pins that ewma() clamps an out-of-range alpha to 100% rather than producing a
+    /// nonsensical weighted average if a future caller ever passes one unchecked.
+    function test_ewma_clampsAlphaAboveBps() public pure {
+        assertEq(ThemisRisk.ewma(500, 9000, ThemisRisk.BPS + 5000), ThemisRisk.ewma(500, 9000, ThemisRisk.BPS));
+    }
+
     /// WHY: a slow alpha must not let one block's spike dominate the regime.
     /// At alpha=10%, a 100x spike from a calm base must stay under the AMBER premium ramp.
     function test_ewma_dampensSingleSpike() public pure {
@@ -72,6 +81,16 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.composite(0, 0, 100, 0), 30);
         assertEq(ThemisRisk.composite(0, 0, 0, 100), 15);
         assertEq(ThemisRisk.composite(100, 100, 100, 100), 100);
+    }
+
+    /// WHY: the weights sum to exactly 100, so any caller passing already-normalized
+    /// [0,100] scores can never mathematically exceed 100 — this clamp is dead code
+    /// under every current caller (all four scores go through normalize() first).
+    /// It's still a real defensive bound worth locking in: composite() accepts raw
+    /// uint32 and does not itself enforce [0,100] on its inputs, so a future caller
+    /// skipping normalize() must still get a clamped, not overflowing-looking, result.
+    function test_composite_clampsWhenInputExceedsMax() public pure {
+        assertEq(ThemisRisk.composite(1000, 0, 0, 0), ThemisRisk.MAX_SCORE);
     }
 
     /// WHY: without hysteresis a trader can straddle the boundary to flip

@@ -163,6 +163,26 @@ contract ThemisIntegrationTest is BaseTest {
         assertEq(diverted, expectedDiverted);
     }
 
+    /// WHY: _divertPremium's `if (premium == 0) return 0;` guard was never exercised
+    /// by any other test — every other AMBER swap uses a notional large enough that
+    /// notional*ppm/1e6 is comfortably nonzero. A 1-wei-input swap, still in AMBER
+    /// from calibration, produces a notional small enough that mulDiv floors to 0:
+    /// the swap must still succeed cleanly with no diversion and no event, not revert.
+    function test_divertPremium_roundsDownToZeroForTinyNotional() public {
+        _driveThemisPoolToAmber();
+        uint256 pendingBefore = vault.pendingForPool(tPoolId, tCurrency1);
+
+        vm.recordLogs();
+        _swap(tKey, -1, true, 0);
+
+        assertEq(vault.pendingForPool(tPoolId, tCurrency1), pendingBefore);
+        bytes32 topic0 = keccak256("RiskPremiumDiverted(bytes32,address,uint256,uint32)");
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertFalse(logs[i].topics.length > 0 && logs[i].topics[0] == topic0);
+        }
+    }
+
     /// WHY: eleos only implements the currency1 branch; copying that limitation
     /// would silently drop the premium on half of all swaps.
     /// @dev Snapshot is taken AFTER calibration, so the baseline already has nonzero

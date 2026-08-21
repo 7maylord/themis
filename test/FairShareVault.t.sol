@@ -88,12 +88,28 @@ contract FairShareVaultTest is BaseTest {
         assertEq(vault.totalReceived(CurrencyLibrary.ADDRESS_ZERO), 1 ether);
     }
 
+    // ─── registerPool() ─────────────────────────────────────────────────────────
+
+    /// WHY: a re-registration could overwrite _poolKey with a different key while
+    /// pendingForPool/distributedForPool still hold value keyed to the OLD key's
+    /// currencies — silently orphaning funds distribute() can no longer reach.
+    function test_registerPool_revertsOnDoubleRegistration() public {
+        vm.expectRevert(IFairShareVault.PoolAlreadyRegistered.selector);
+        vault.registerPool(poolId, poolKey);
+    }
+
     // ─── credit() ───────────────────────────────────────────────────────────────
 
     function test_credit_revertsForNonHook() public {
         vm.prank(address(0xBEEF));
         vm.expectRevert(IFairShareVault.OnlyHook.selector);
         vault.credit(poolId, currency1, 100);
+    }
+
+    function test_credit_revertsForUnregisteredPool() public {
+        PoolKey memory otherKey = PoolKey(currency0, currency1, 3000, 60, IHooks(address(0)));
+        vm.expectRevert(IFairShareVault.PoolNotRegistered.selector);
+        vault.credit(otherKey.toId(), currency1, 100);
     }
 
     function test_credit_accumulatesPerPoolPerCurrency() public {
@@ -156,6 +172,15 @@ contract FairShareVaultTest is BaseTest {
         vault.attributeEth(poolId, 0.1 ether);
     }
 
+    function test_attributeEth_revertsForUnregisteredPool() public {
+        (bool ok,) = address(vault).call{value: 1 ether}("");
+        assertTrue(ok);
+
+        PoolKey memory otherKey = PoolKey(currency0, currency1, 3000, 60, IHooks(address(0)));
+        vm.expectRevert(IFairShareVault.PoolNotRegistered.selector);
+        vault.attributeEth(otherKey.toId(), 0.1 ether);
+    }
+
     // ─── distribute() ───────────────────────────────────────────────────────────
 
     function test_distribute_isPermissionless() public {
@@ -186,6 +211,14 @@ contract FairShareVaultTest is BaseTest {
         vault.distribute(otherKey.toId());
     }
 
+    /// WHY: unlockCallback donates and settles using the vault's own balance —
+    /// if anyone could call it directly (not via a real poolManager.unlock()), they
+    /// could force arbitrary donate()/settle() calls against the vault's holdings.
+    function test_unlockCallback_revertsForNonPoolManager() public {
+        vm.expectRevert("not pool manager");
+        vault.unlockCallback(abi.encode(poolId, poolKey, uint256(1), uint256(1)));
+    }
+
     // ─── pause() ────────────────────────────────────────────────────────────────
 
     function test_pause_blocksCreditAndDistribute() public {
@@ -196,6 +229,18 @@ contract FairShareVaultTest is BaseTest {
 
         vm.expectRevert();
         vault.distribute(poolId);
+    }
+
+    function test_unpause_reenablesCreditAndDistribute() public {
+        vault.pause();
+        vault.unpause();
+
+        vault.credit(poolId, currency1, 100);
+        assertEq(vault.pendingForPool(poolId, currency1), 100);
+
+        IERC20(Currency.unwrap(currency1)).transfer(address(vault), 100);
+        vault.distribute(poolId);
+        assertEq(vault.distributedForPool(poolId, currency1), 100);
     }
 
     // ─── setHook() ──────────────────────────────────────────────────────────────

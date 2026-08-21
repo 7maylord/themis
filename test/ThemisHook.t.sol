@@ -203,6 +203,20 @@ contract ThemisHookTest is BaseTest {
         assertTrue(ok);
     }
 
+    /// WHY: every other previewRisk test uses exact-input (negative amountSpecified)
+    /// — _estimateNextSqrtPrice's exact-output branch (getNextSqrtPriceFromOutput)
+    /// was never exercised by anything. A real quote UI calls this for exact-output
+    /// swaps too (e.g. "I want exactly 1 ETH out"), so it must not revert or produce
+    /// a nonsensical score.
+    function test_previewRisk_exactOutput_doesNotRevert() public {
+        _swap(-1e15, true);
+        vm.roll(block.number + 1);
+
+        (uint32 riskScore, uint8 regime,) = hook.previewRisk(poolId, true, int256(1e18));
+        assertLe(riskScore, 100);
+        assertTrue(regime == ThemisRisk.GREEN || regime == ThemisRisk.AMBER || regime == ThemisRisk.RED);
+    }
+
     // ─── Hysteresis ─────────────────────────────────────────────────────────────
 
     function test_regimeTransition_respectsHysteresis() public {
@@ -268,9 +282,35 @@ contract ThemisHookTest is BaseTest {
         hook.setAlphaBps(ThemisRisk.BPS + 1);
     }
 
+    function test_setAlphaBps_succeedsWithValidValue() public {
+        hook.setAlphaBps(1000);
+        assertEq(hook.alphaBps(), 1000);
+    }
+
     function test_setMaxPremiumPpm_revertsAboveHardCap() public {
         vm.expectRevert();
         hook.setMaxPremiumPpm(2501);
+    }
+
+    function test_setMaxPremiumPpm_succeedsWithValidValue() public {
+        hook.setMaxPremiumPpm(1000);
+        assertEq(hook.maxPremiumPpm(), 1000);
+    }
+
+    function test_setFullScales_updatesAllFourValues() public {
+        hook.setFullScales(111, 222, 333, 444);
+        assertEq(hook.volFullScaleBps(), 111);
+        assertEq(hook.sizeFullScaleBps(), 222);
+        assertEq(hook.impactFullScaleBps(), 333);
+        assertEq(hook.flowFullScale(), 444);
+    }
+
+    /// WHY: a zero full-scale would make normalize() divide by zero territory —
+    /// ThemisRisk.normalize already guards that, but the setter should never let a
+    /// misconfiguration reach it in the first place.
+    function test_setFullScales_revertsOnZeroValue() public {
+        vm.expectRevert("full scale");
+        hook.setFullScales(0, 222, 333, 444);
     }
 
     function test_setters_revertForNonOwner() public {
@@ -282,6 +322,18 @@ contract ThemisHookTest is BaseTest {
         vm.expectRevert();
         hook.setFullScales(100, 100, 100, 100);
         vm.stopPrank();
+    }
+
+    // ─── pause() / unpause() ────────────────────────────────────────────────────
+
+    /// @dev Pausing/unpausing the hook itself is exercised end-to-end (diversion
+    ///      on/off) by ThemisIntegration.t.sol; this just confirms unpause() flips
+    ///      the flag Pausable exposes, which nothing else directly asserts.
+    function test_unpause_clearsPausedState() public {
+        hook.pause();
+        assertTrue(hook.paused());
+        hook.unpause();
+        assertFalse(hook.paused());
     }
 
     // ─── Fuzz ───────────────────────────────────────────────────────────────────
