@@ -1,3 +1,29 @@
+# Themis
+
+An adaptive Uniswap v4 hook that scores swap risk in real time, routes risky
+flow through Flashbots protection, and redirects captured value to LPs via
+`FairShareVault`. See `themis-prd-trd.md` for the full spec.
+
+## Economics (mainnet-fork comparison)
+
+`test/Economics.fork.t.sol` compares Themis against a vanilla low-fee pool and
+a flat high-fee pool across five scenarios on a real mainnet fork. Full results
+and methodology: [`docs/ECONOMICS.md`](docs/ECONOMICS.md), raw data:
+[`data/economics.json`](data/economics.json).
+
+**The honest finding: Themis does not beat the flat high-fee baseline on raw LP
+net value in any of the five scenarios tested.** It does beat plain
+vanilla-low-fee everywhere except the calm scenario (where all three are
+identical by design — zero protection overhead when there's no risk), and it
+clearly wins on trader cost (sandwich cost cut by more than half) and on
+correctly detecting swap-splitting attacks that neither baseline can see at
+all. This simulation only measures Themis's on-chain-guaranteed value stream
+(the hook's own premium diversion) — it cannot exercise the live Flashbots
+MEV-refund stream that's the other half of the design, since that requires
+real relay infrastructure a Foundry fork test can't reach. See
+`docs/ECONOMICS.md` for the full breakdown and why this isn't being retuned
+away.
+
 ## Foundry
 
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**

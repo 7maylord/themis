@@ -35,7 +35,10 @@ jobs:
         run: forge build --sizes
 
       - name: Run Forge tests
-        run: forge test -vvv
+        # Excludes *.fork.t.sol — those need a real MAINNET_RPC_URL and hit live
+        # mainnet state, so they're run manually/separately (see Task 11), not on
+        # every push.
+        run: forge test -vvv --no-match-path "test/*.fork.t.sol"
 
       - name: Run Forge risk math fuzz suite
         run: forge test --fuzz-runs 10000 --match-path "test/ThemisRisk.t.sol"
