@@ -42,11 +42,7 @@ contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
         FairShareVault vault = FairShareVault(payable(vm.envAddress("FAIR_SHARE_VAULT_ADDRESS")));
 
         PoolKey memory poolKey = PoolKey({
-            currency0: currency0,
-            currency1: currency1,
-            fee: LP_FEE,
-            tickSpacing: TICK_SPACING,
-            hooks: hookContract
+            currency0: currency0, currency1: currency1, fee: LP_FEE, tickSpacing: TICK_SPACING, hooks: hookContract
         });
 
         tickLower = TickMath.minUsableTick(TICK_SPACING);

@@ -29,16 +29,16 @@ import {Deployers} from "test/utils/Deployers.sol";
 contract BaseScript is Script, Deployers {
     address immutable deployerAddress;
 
-    IERC20  immutable internal token0;
-    IERC20  immutable internal token1;
-    IHooks  immutable internal hookContract;
+    IERC20 internal immutable token0;
+    IERC20 internal immutable token1;
+    IHooks internal immutable hookContract;
 
     Currency immutable currency0;
     Currency immutable currency1;
 
     constructor() {
-        token0       = IERC20(vm.envOr("TOKEN0_ADDRESS", address(0)));
-        token1       = IERC20(vm.envOr("TOKEN1_ADDRESS", address(0)));
+        token0 = IERC20(vm.envOr("TOKEN0_ADDRESS", address(0)));
+        token1 = IERC20(vm.envOr("TOKEN1_ADDRESS", address(0)));
         hookContract = IHooks(vm.envOr("THEMIS_HOOK_ADDRESS", address(0)));
 
         // Make sure artifacts are available, either deploy or configure.
@@ -48,13 +48,13 @@ contract BaseScript is Script, Deployers {
 
         (currency0, currency1) = getCurrencies();
 
-        vm.label(address(permit2),         "Permit2");
-        vm.label(address(poolManager),     "V4PoolManager");
+        vm.label(address(permit2), "Permit2");
+        vm.label(address(poolManager), "V4PoolManager");
         vm.label(address(positionManager), "V4PositionManager");
-        vm.label(address(swapRouter),      "V4SwapRouter");
+        vm.label(address(swapRouter), "V4SwapRouter");
 
-        vm.label(address(token0),       "Currency0");
-        vm.label(address(token1),       "Currency1");
+        vm.label(address(token0), "Currency0");
+        vm.label(address(token1), "Currency1");
         vm.label(address(hookContract), "HookContract");
     }
 
