@@ -16,3 +16,6 @@ out/
 # Medusa fuzzing corpus and coverage reports — regenerable, not source
 corpus/
 crytic-export/
+
+# script/searcher is a standalone Node/TS script, not part of the Foundry build
+script/searcher/node_modules/

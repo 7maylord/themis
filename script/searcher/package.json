@@ -1,0 +1,8 @@
+{
+  "name": "themis-searcher",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "viem": "^2.23.0"
+  }
+}
