@@ -4,6 +4,27 @@ An adaptive Uniswap v4 hook that scores swap risk in real time, routes risky
 flow through Flashbots protection, and redirects captured value to LPs via
 `FairShareVault`. See `themis-prd-trd.md` for the full spec.
 
+## Important limitations — read before trusting any claim in this repo
+
+- **The hook does not, and cannot, verify that a transaction arrived via
+  Flashbots.** Provenance belongs to the routing layer, not the hook (spec §14.2,
+  FR-014) — `ThemisHook` scores risk and diverts a premium based on on-chain swap
+  characteristics alone; it has no way to inspect how a transaction was submitted.
+- **FairShare has two sources, and only one is guaranteed.** An on-chain risk
+  premium charged to elevated-risk flow (unconditional, proven live — see
+  `docs/DEMO.md`), and Flashbots MEV refunds, which are variable, best-effort, and
+  never guaranteed — see `docs/ARCHITECTURE.md`'s two-value-streams section.
+- **Sepolia has no organic searcher market.** The live refund demonstration in
+  `docs/DEMO.md` uses a controlled bundle — the same account plays both the
+  "victim" and the "searcher" — explicitly labeled as such, not organic MEV.
+- **Every economics figure in this repo is a mainnet-fork simulation, not an
+  observed on-chain result.** `docs/ECONOMICS.md` and `data/economics.json` come
+  from `test/Economics.fork.t.sol` running synthetic, seeded scenarios against a
+  forked mainnet — real infrastructure, synthetic trade flow.
+- **The contracts have not had an external audit.** Mainnet deployment is gated on
+  one — see `docs/DEPLOYMENT.md`'s pre-mainnet checklist for the full list of what
+  is and isn't done yet.
+
 ## Economics (mainnet-fork comparison)
 
 `test/Economics.fork.t.sol` compares Themis against a vanilla low-fee pool and
@@ -73,9 +94,8 @@ $ anvil
 
 ### Deploy
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the actual Themis deployment
+sequence (`script/00_DeployThemis.s.sol` onward) and the current Sepolia addresses.
 
 ### Cast
 

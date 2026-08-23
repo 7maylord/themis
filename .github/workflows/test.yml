@@ -28,6 +28,20 @@ jobs:
       - name: Show Forge version
         run: forge --version
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Slither
+        run: pip install slither-analyzer
+
+      - name: Run Slither
+        # Task 13 Step 1 — every High/Medium finding as of this pass has been
+        # triaged (fixed, or documented inline with slither-disable-next-line +
+        # a WHY comment). --fail-medium keeps this a real gate against new
+        # ones, without blocking on the already-reviewed Low/Informational set.
+        run: slither src/ --config-file lib/v4-hooks-public/slither.config.json --fail-medium
+
       - name: Run Forge fmt
         run: forge fmt --check
 
