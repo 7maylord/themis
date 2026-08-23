@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Vm} from "forge-std/Vm.sol";
+import {console} from "forge-std/console.sol";
 
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -128,6 +129,25 @@ contract ThemisIntegrationTest is BaseTest {
 
         assertEq(tDelta.amount1(), vDelta.amount1());
         assertEq(vault.pendingForPool(tPoolId, tCurrency1), 0);
+    }
+
+    /// @dev Isolated afterSwap gas overhead Themis adds on a GREEN swap relative to
+    ///      a vanilla pool with no hook — the "protection overhead" denominator spec
+    ///      §25 refers to. Logged, not asserted against a hard threshold (gas costs
+    ///      shift with compiler/optimizer versions) — see docs/ARCHITECTURE.md for
+    ///      the figure recorded from this run.
+    function test_gasOverhead_afterSwapOnGreenSwap() public {
+        uint256 gasBeforeVanilla = gasleft();
+        _swap(vKey, -1e15, true, 0);
+        uint256 vanillaGas = gasBeforeVanilla - gasleft();
+
+        uint256 gasBeforeThemis = gasleft();
+        _swap(tKey, -1e15, true, 0);
+        uint256 themisGas = gasBeforeThemis - gasleft();
+
+        console.log("Vanilla swap gas:", vanillaGas);
+        console.log("Themis swap gas: ", themisGas);
+        console.log("afterSwap overhead (gas):", themisGas - vanillaGas);
     }
 
     // ─── AMBER diversion ────────────────────────────────────────────────────────
