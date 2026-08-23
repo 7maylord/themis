@@ -51,6 +51,7 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
     /// @notice Point vault to the deployed hook (callable exactly once after deployment).
     function setHook(address hook_) external onlyOwner {
         require(hook == address(0), "hook already set");
+        require(hook_ != address(0), "hook cannot be zero address");
         hook = hook_;
         emit HookSet(hook_);
     }
@@ -123,6 +124,12 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         pendingForPool[poolId][key.currency0] = 0;
         pendingForPool[poolId][key.currency1] = 0;
 
+        // unused-return: unlockCallback below always returns "" — nothing to check.
+        // reentrancy-benign: the state writes after this call are guarded by
+        // `nonReentrant`, and the only reentrant call this ever triggers is
+        // PoolManager invoking this same contract's own unlockCallback — not an
+        // arbitrary attacker-controlled path.
+        // slither-disable-next-line unused-return,reentrancy-benign
         poolManager.unlock(abi.encode(poolId, key, amount0, amount1));
 
         distributedForPool[poolId][key.currency0] += amount0;
@@ -135,6 +142,9 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         (, PoolKey memory key, uint256 amount0, uint256 amount1) =
             abi.decode(rawData, (PoolId, PoolKey, uint256, uint256));
 
+        // Intentional: the returned BalanceDelta just mirrors amount0/amount1, which
+        // are already known — settle() below reverts on any mismatch anyway.
+        // slither-disable-next-line unused-return
         poolManager.donate(key, amount0, amount1, "");
 
         if (amount0 > 0) key.currency0.settle(poolManager, address(this), amount0, false);

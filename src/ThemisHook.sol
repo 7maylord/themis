@@ -109,6 +109,8 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         returns (uint32 riskScore, uint8 regime, uint24 premium)
     {
         RiskState memory st = _riskState[poolId];
+        // Intentional: tick and protocolFee aren't used by the risk math below.
+        // slither-disable-next-line unused-return
         (uint160 currentSqrtPrice,,, uint24 lpFee) = poolManager.getSlot0(poolId);
         uint128 liquidity = poolManager.getLiquidity(poolId);
 
@@ -152,6 +154,11 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         view
         returns (uint32)
     {
+        // Safe: lastVolSqrtPrice==0 is a deterministic "never initialized" sentinel
+        // (real prices are never 0), and block.number is a monotonic integer, not an
+        // attacker-manipulable balance — neither comparison is the dangerous kind
+        // this detector targets.
+        // slither-disable-next-line incorrect-equality
         if (st.lastVolSqrtPrice == 0 || block.number <= st.lastUpdatedBlock) {
             return st.volatilityScore;
         }
@@ -199,6 +206,9 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         if (paused()) return 0;
 
         uint24 ppm = ThemisRisk.premiumPpm(riskScore, maxPremiumPpm);
+        // Safe: ppm is a deterministic pure-function output (ThemisRisk.premiumPpm),
+        // not a manipulable balance — exact-zero is the correct "nothing to divert" check.
+        // slither-disable-next-line incorrect-equality
         if (ppm == 0) return 0;
 
         bool exactInput = params.amountSpecified < 0;
@@ -209,6 +219,10 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
 
         uint256 notional = unspecifiedDelta > 0 ? uint256(int256(unspecifiedDelta)) : uint256(-int256(unspecifiedDelta));
         uint256 premium = FullMath.mulDiv(notional, ppm, SWAP_FEE_DENOMINATOR);
+        // Safe: premium is deterministically computed above, not a manipulable
+        // balance — exact-zero (e.g. tiny notional rounding to 0) is the correct
+        // "nothing to divert" check, same as the ppm==0 guard above.
+        // slither-disable-next-line incorrect-equality
         if (premium == 0) return 0;
 
         emit RiskPremiumDiverted(poolId, premiumCurrency, premium, riskScore);
@@ -227,6 +241,8 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     {
         RiskState memory st = _riskState[poolId];
 
+        // Intentional: tick, protocolFee, and lpFee aren't used by the risk math below.
+        // slither-disable-next-line unused-return
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
         uint128 liquidity = poolManager.getLiquidity(poolId);
 
@@ -278,6 +294,8 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         internal
         returns (RiskState memory)
     {
+        // Safe: deterministic "never initialized" sentinel, see _forecastVolatilityScore.
+        // slither-disable-next-line incorrect-equality
         if (st.lastVolSqrtPrice == 0) {
             st.lastVolSqrtPrice = sqrtPriceX96; // first-ever swap: establish baseline only
             return st;
@@ -342,10 +360,15 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         view
         returns (uint64 newEwmaBps, uint64 newBlockBps, uint256 liveBps)
     {
+        // Safe: both are monotonic block-number/sentinel comparisons, not
+        // attacker-manipulable balances — see _forecastVolatilityScore above for
+        // the same reasoning, reused here for the block-accumulation pattern.
+        // slither-disable-next-line incorrect-equality
         if (lastUpdatedBlock == block.number) {
             newEwmaBps = prevEwmaBps;
             newBlockBps = uint64(_capToUint64(uint256(prevBlockBps) + sample));
         } else {
+            // slither-disable-next-line incorrect-equality
             uint256 gap = lastUpdatedBlock == 0 ? 0 : block.number - lastUpdatedBlock;
             uint256 decayed = gap <= 1
                 ? prevEwmaBps
