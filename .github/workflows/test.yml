@@ -75,6 +75,13 @@ jobs:
         run: |
           ! grep -rn "rawTransaction\|signedTx" lib app --include="*.ts" --include="*.tsx" | grep -i "console\."
 
+      - name: No hard-coded research results
+        # FR-012 / Task 12 Step 3 — every research-dashboard number must come from
+        # data/economics.json or a live chain read, never a typed-in "result".
+        run: |
+          ! grep -rnE '"(lpNetPnl|feeRevenue|mevRecaptured)":\s*[0-9]' app components
+          ! grep -rnE '"(lpNetValueWeiC0Equiv|feeRevenue[01]|fairShareRevenue[01]|effectiveTraderCostWeiC0Equiv|lvrProxyWeiC0Equiv|protectedVolumeShareBps)":\s*"?-?[0-9]' app components
+
       - name: Lint
         run: pnpm lint
 

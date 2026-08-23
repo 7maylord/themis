@@ -30,6 +30,89 @@ export const THEMIS_HOOK_ABI = [
       { name: 'regime', type: 'uint8', indexed: false },
     ],
   },
+  {
+    name: 'RiskPremiumDiverted',
+    type: 'event',
+    inputs: [
+      { name: 'poolId', type: 'bytes32', indexed: true },
+      { name: 'currency', type: 'address', indexed: false },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'riskScore', type: 'uint32', indexed: false },
+    ],
+  },
+  {
+    name: 'getRiskState',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'poolId', type: 'bytes32' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'volBps', type: 'uint64' },
+          { name: 'flowEwmaBps', type: 'uint64' },
+          { name: 'blockFlowBps', type: 'uint64' },
+          { name: 'sizeEwmaBps', type: 'uint64' },
+          { name: 'blockSizeBps', type: 'uint64' },
+          { name: 'impactEwmaBps', type: 'uint64' },
+          { name: 'blockImpactBps', type: 'uint64' },
+          { name: 'riskScore', type: 'uint32' },
+          { name: 'volatilityScore', type: 'uint32' },
+          { name: 'flowScore', type: 'uint32' },
+          { name: 'lastSqrtPrice', type: 'uint160' },
+          { name: 'lastVolSqrtPrice', type: 'uint160' },
+          { name: 'lastUpdatedBlock', type: 'uint64' },
+          { name: 'regime', type: 'uint8' },
+        ],
+      },
+    ],
+  },
+] as const
+
+export const FAIR_SHARE_VAULT_ABI = [
+  {
+    name: 'FairShareReceived',
+    type: 'event',
+    inputs: [
+      { name: 'sender', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'FairShareDistributed',
+    type: 'event',
+    inputs: [
+      { name: 'poolId', type: 'bytes32', indexed: true },
+      { name: 'amount0', type: 'uint256', indexed: false },
+      { name: 'amount1', type: 'uint256', indexed: false },
+    ],
+  },
+] as const
+
+// Uniswap v4's official StateView periphery contract (read-only lens over
+// PoolManager's extsload-only storage) — same address convention as
+// PoolManager/PositionManager, deployed canonically per chain.
+export const STATE_VIEW_ABI = [
+  {
+    name: 'getSlot0',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'poolId', type: 'bytes32' }],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: 'protocolFee', type: 'uint24' },
+      { name: 'lpFee', type: 'uint24' },
+    ],
+  },
+  {
+    name: 'getLiquidity',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'poolId', type: 'bytes32' }],
+    outputs: [{ name: 'liquidity', type: 'uint128' }],
+  },
 ] as const
 
 // Uniswap v4 SwapRouter (hookmate IUniswapV4Router04), single-pool general swap.
