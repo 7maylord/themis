@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { parseEther } from 'viem'
 import { useAccount, useConnect, useWalletClient, useWriteContract } from 'wagmi'
 
@@ -13,6 +13,21 @@ const GREEN = 0
 // the remainder follows Flashbots builder/validator economics.
 const VAULT_REFUND_PERCENT = 80
 
+const subscribeNoop = () => () => {}
+
+// wagmi's connection state rehydrates from browser storage on the client, so
+// isConnected can flip true immediately after mount even though SSR always
+// renders the disconnected shell (no wallet access server-side). Branching on
+// isConnected directly causes a hydration mismatch — and React tearing down and
+// regenerating the DOM mid-mismatch is what makes clicks silently no-op right
+// after load. useSyncExternalStore is React's own documented fix for exactly
+// this: the server snapshot and the first client snapshot both return false,
+// so the first client render is identical to the server's; only a later,
+// ordinary re-render (not the hydration pass) picks up the real value.
+function useHasMounted() {
+  return useSyncExternalStore(subscribeNoop, () => true, () => false)
+}
+
 export function SwapCard() {
   const { address, isConnected } = useAccount()
   const { connect, connectors } = useConnect()
@@ -24,6 +39,8 @@ export function SwapCard() {
   const [protectionPending, setProtectionPending] = useState(false)
   const [protectionError, setProtectionError] = useState<string | null>(null)
   const [publicWarningShown, setPublicWarningShown] = useState(false)
+
+  const mounted = useHasMounted()
 
   let amountWei = 0n
   try {
@@ -80,7 +97,7 @@ export function SwapCard() {
     submitSwap()
   }
 
-  if (!isConnected) {
+  if (!mounted || !isConnected) {
     return (
       <div className="rounded-xl border border-white/10 p-6">
         <button
