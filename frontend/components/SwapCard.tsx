@@ -2,7 +2,8 @@
 
 import { useState, useSyncExternalStore } from 'react'
 import { parseEther } from 'viem'
-import { useAccount, useConnect, useWalletClient, useWriteContract } from 'wagmi'
+import { sepolia } from 'wagmi/chains'
+import { useAccount, useConnect, useSwitchChain, useWalletClient, useWriteContract } from 'wagmi'
 
 import { SWAP_ROUTER_ABI } from '@/lib/abis'
 import { addProtectedNetwork, buildProtectRpcUrl } from '@/lib/protect'
@@ -29,8 +30,9 @@ function useHasMounted() {
 }
 
 export function SwapCard() {
-  const { address, isConnected } = useAccount()
+  const { address, isConnected, chainId } = useAccount()
   const { connect, connectors } = useConnect()
+  const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
   const { data: walletClient } = useWalletClient()
   const { writeContract, isPending: isSwapping } = useWriteContract()
 
@@ -60,7 +62,10 @@ export function SwapCard() {
   }
 
   async function handleEnableProtection() {
-    if (!walletClient) return
+    if (!walletClient) {
+      setProtectionError('Wallet client not ready yet — try disconnecting and reconnecting your wallet.')
+      return
+    }
     setProtectionError(null)
     setProtectionPending(true)
     try {
@@ -105,6 +110,25 @@ export function SwapCard() {
           className="rounded-lg bg-white px-4 py-2 font-medium text-black"
         >
           Connect Wallet
+        </button>
+      </div>
+    )
+  }
+
+  // wagmi only produces a walletClient (needed for addProtectedNetwork) when the
+  // wallet's active chain matches one configured in lib/wagmi.ts (Sepolia only).
+  // Connected-but-wrong-chain otherwise looks identical to the working state
+  // right up until "Enable protected routing" silently does nothing.
+  if (chainId !== sepolia.id) {
+    return (
+      <div className="rounded-xl border border-red-500/40 p-6">
+        <p className="mb-3 text-sm text-red-400">Wrong network — connect on Ethereum Sepolia to continue.</p>
+        <button
+          onClick={() => switchChain({ chainId: sepolia.id })}
+          disabled={isSwitchingChain}
+          className="rounded-lg bg-white px-4 py-2 font-medium text-black disabled:opacity-50"
+        >
+          {isSwitchingChain ? 'Switching…' : 'Switch to Sepolia'}
         </button>
       </div>
     )
