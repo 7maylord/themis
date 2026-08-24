@@ -147,10 +147,37 @@ swap," "private submission via Flashbots Sepolia," and "private transaction
 included, hook executes" — using a real key, a real signature, and real Sepolia
 infrastructure, not a simulation.
 
-### Frontend UI — still open
+### Frontend UI — verified
 
-Not covered by the above: actually opening `/swap` in a browser, connecting a
-real wallet, seeing the AMBER/RED decision panel render, clicking "Enable
-protected routing," and approving the resulting `wallet_addEthereumChain`
-prompt. This is `components/SwapCard.tsx`'s own code path, and the only way to
-verify it is a human at a browser — deferred, not yet run as of this writing.
+Done by a human at a browser: opened `/swap`, connected a real wallet, saw the
+RED decision panel render live, clicked "Enable protected routing," approved
+the `wallet_addEthereumChain` prompt for "Sepolia (Themis Protected)," and
+signed a real 0.02 ETH swap.
+
+- Tx: [`0x98fc9b56ce26ca8c702bdb360e71f9fc503d349e19d486ca49c20067b623aec6`](https://sepolia.etherscan.io/tx/0x98fc9b56ce26ca8c702bdb360e71f9fc503d349e19d486ca49c20067b623aec6)
+- `ThemisSwapObserved`: amountSpecified=-0.02 ETH, riskScore=88, regime=2 (RED)
+- `RiskPremiumDiverted` + `FairShareCredited` fired, same as the script-driven
+  run above — the hook and vault behave identically regardless of which path
+  submitted the transaction.
+
+Two real bugs surfaced and fixed by this run, both in `components/SwapCard.tsx`:
+
+1. **Hydration mismatch breaking clicks entirely.** The component branched its
+   whole render on `isConnected`, which is always `false` during SSR (no wallet
+   access server-side) but can flip `true` immediately on the client if wagmi
+   rehydrates a previous connection from browser storage. React tearing down
+   and regenerating the mismatched tree mid-interaction made button clicks
+   silently no-op. Fixed with `useSyncExternalStore`-based mount detection
+   (React's own documented pattern for this exact class of bug) — the server
+   snapshot and the first client snapshot both return `false`, so the first
+   client render is provably identical to the server's.
+2. **Silent failure when the wallet's on the wrong chain.** `useWalletClient()`
+   only produces a client when the wallet's active chain matches one configured
+   in `lib/wagmi.ts` (Sepolia only) — connected-but-wrong-network looked
+   identical to the working state right up until "Enable protected routing"
+   silently did nothing (`if (!walletClient) return`, no feedback). Fixed with
+   an explicit chain check that renders a "Switch to Sepolia" prompt, and the
+   walletClient-missing case now surfaces a visible error instead of no-op-ing.
+
+Both P0-acceptance-gate halves of Task 9 Step 5 are now closed: the
+infrastructure (script-driven, above) and the actual UI flow (this run).

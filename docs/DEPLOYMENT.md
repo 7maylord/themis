@@ -82,9 +82,12 @@ still needs to happen before it would be:
       diversion → vault credit → LP distribution, using real transactions, not
       just unit tests (`docs/DEMO.md`).
 - [x] Real signed AMBER/RED swap submitted privately via Flashbots Protect RPC
-      and included on-chain with the hook firing correctly (`docs/DEMO.md`'s
-      "Protected AMBER/RED swap via Flashbots Protect RPC" section) — the
-      infrastructure half of Task 9 Step 5.
+      and included on-chain with the hook firing correctly, both via script and
+      via a real human clicking through the actual browser UI — all of Task 9
+      Step 5, both halves (`docs/DEMO.md`). Two real bugs in
+      `components/SwapCard.tsx` found and fixed along the way: a hydration
+      mismatch that silently broke button clicks, and a silent no-op when the
+      wallet was on the wrong chain.
 
 **Not done — genuinely open:**
 - [ ] **External audit.** Nothing above substitutes for one. This is the single
@@ -101,13 +104,6 @@ still needs to happen before it would be:
       once (or if) Flashbots' Sepolia infrastructure recovers, and separately
       worth proving on mainnet, where the relay is demonstrably reliable in
       production.
-- [ ] **The frontend UI half of Task 9 Step 5** — actually opening `/swap` in a
-      browser, connecting a real wallet, and clicking through
-      `components/SwapCard.tsx`'s own decision panel and the
-      `wallet_addEthereumChain` prompt it triggers. The underlying
-      infrastructure this UI drives is now proven (see above); only the
-      human-at-a-browser click-through remains, since that's not something a
-      script can substitute for.
 - [ ] **Real token pair economics.** The mainnet-fork simulation (`docs/ECONOMICS.md`)
       uses a fresh `MockERC20`, not an existing liquid pair — real trading behavior
       against genuine market depth and real MEV searcher competition has not been
