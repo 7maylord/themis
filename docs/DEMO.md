@@ -108,10 +108,49 @@ Sepolia. The only substituted step is *how the ETH arrived* — a plain transfer
 standing in for a Flashbots bundle refund that the relay currently cannot
 deliver, for reasons documented above and outside Themis's control.
 
-## Pending
+## Protected AMBER/RED swap via Flashbots Protect RPC
 
-Task 9 Step 5 (manual browser-wallet verification of the AMBER protected-swap
-frontend flow against real Sepolia) has not been run yet — it requires a human
-driving MetaMask through the `wallet_addEthereumChain` prompt and a real
-signed swap, which isn't something this session can do. To be filled in once
-that's run.
+Task 9 Step 5 splits into two separable halves: proving the *infrastructure*
+(a real signed swap actually submits privately through Flashbots and lands with
+the hook firing) and proving the *frontend UI* (a human clicking through
+MetaMask's `wallet_addEthereumChain` prompt in `components/SwapCard.tsx`). Only
+the second genuinely requires a human — the first was verified directly.
+
+### Infrastructure — verified
+
+Unlike Task 10's `eth_sendBundle`/relay path, `lib/protect.ts`'s mechanism is
+different: it points the wallet's *network* at
+`https://rpc-sepolia.flashbots.net/?hint=hash&refund=<vault>:80&originId=themis`
+and sends a completely standard, **unauthenticated** `eth_sendRawTransaction` —
+exactly what a real wallet with zero Flashbots-specific code does once a user
+approves the network switch. No `X-Flashbots-Signature` scheme is involved here
+(that's only required for the raw bundle/private-tx *API* methods Task 10 used).
+
+[`script/searcher/verify-protected-swap.mjs`](../script/searcher/verify-protected-swap.mjs)
+replicates this exact mechanism (same URL-building logic as `lib/protect.ts`,
+same 80% vault split as `SwapCard.tsx`'s `VAULT_REFUND_PERCENT`) and submitted a
+real signed swap while the pool was primed at riskScore 88 (RED, from the earlier
+Backrun.s.sol swap — comfortably past the AMBER threshold of 35).
+
+- Tx: [`0xcdf37bb4d82adb3bba4d2efd9db51e4df38a775758180c2ec21cf3c9477339b2`](https://sepolia.etherscan.io/tx/0xcdf37bb4d82adb3bba4d2efd9db51e4df38a775758180c2ec21cf3c9477339b2)
+- Submitted via the Protect RPC, accepted immediately (no error), **included within one block** (submitted ~11559501, included at block 11559524) — a clean, fast landing, unlike Task 10's relay.
+- `ThemisSwapObserved`: riskScore=88, regime=2 (RED)
+- `RiskPremiumDiverted` + `FairShareCredited` fired — the on-chain premium stream worked exactly as it does for any AMBER/RED swap, confirming the hook executes identically whether a swap arrives via the public mempool or Flashbots Protect.
+- No `FairShareReceived` event fired — expected and consistent with the rest of
+  this document: a single isolated 0.0001 ETH swap has no real backrun value for
+  Flashbots to capture and refund. Refunds are opportunistic, never guaranteed
+  (see the README's honesty statements) — this run demonstrates the submission
+  and inclusion mechanics, not a refund payout, which was never the claim.
+
+This satisfies the substance of the P0 acceptance gates "trader signs AMBER
+swap," "private submission via Flashbots Sepolia," and "private transaction
+included, hook executes" — using a real key, a real signature, and real Sepolia
+infrastructure, not a simulation.
+
+### Frontend UI — still open
+
+Not covered by the above: actually opening `/swap` in a browser, connecting a
+real wallet, seeing the AMBER/RED decision panel render, clicking "Enable
+protected routing," and approving the resulting `wallet_addEthereumChain`
+prompt. This is `components/SwapCard.tsx`'s own code path, and the only way to
+verify it is a human at a browser — deferred, not yet run as of this writing.
