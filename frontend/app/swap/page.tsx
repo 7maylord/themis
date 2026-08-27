@@ -1,3 +1,4 @@
+import { FaucetCard } from '@/components/FaucetCard'
 import { SwapCard } from '@/components/SwapCard'
 
 export default function SwapPage() {
@@ -8,6 +9,7 @@ export default function SwapPage() {
         <p className="text-sm text-white/60">Ethereum Sepolia · ETH → THMT</p>
       </div>
       <SwapCard />
+      <FaucetCard />
     </main>
   )
 }

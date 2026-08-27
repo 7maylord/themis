@@ -161,4 +161,18 @@ export const ERC20_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'string' }],
   },
+  {
+    // solmate's MockERC20.mint — permissionless, no access control at all (see
+    // lib/v4-hooks-public/lib/fluid-contracts-public/lib/solmate/src/test/utils/mocks/MockERC20.sol).
+    // Only THMT is ever minted through the frontend; native ETH still needs a
+    // real Sepolia faucet, which is why FaucetCard also links out to one.
+    name: 'mint',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+    ],
+    outputs: [],
+  },
 ] as const
