@@ -2,7 +2,7 @@
 
 ## System overview
 
-Three on-chain contracts, one frontend, no backend.
+Three on-chain contracts, one frontend, one minimal record-keeping backend.
 
 - **`ThemisHook`** — a Uniswap v4 hook (`afterSwap` + `afterSwapReturnDelta` only)
   that scores every swap's risk in real time, diverts a risk-scaled premium from
@@ -17,9 +17,42 @@ Three on-chain contracts, one frontend, no backend.
   separate from `ThemisHook` specifically so the risk math is fuzzable in isolation
   (`test/ThemisRisk.t.sol`) without needing a live pool.
 - **Frontend** (`frontend/`) — talks directly to the trader's wallet, the chain, and
-  Flashbots' public RPC endpoints. No server sits between them; see
-  `docs/THREAT_MODEL.md` §26.5 for why the backend-threats section of the spec
-  mostly doesn't apply here.
+  Flashbots' public RPC endpoints for the actual swap submission. No server sits
+  between the wallet and Flashbots; see `docs/THREAT_MODEL.md` §26.5 for why the
+  backend-threats section of the spec mostly doesn't apply to *that* path.
+- **Backend** (`frontend/app/api/`, `frontend/lib/db.ts`) — a small Next.js API route
+  backed by SQLite, added specifically to close the PRD's transaction-tracking
+  requirement (FR-011, P1 "private transaction status stored"). See "Why the
+  backend can't relay the transaction" below for why its role is record-keeping,
+  not transaction relay, and why that's a wallet constraint, not a design choice.
+
+## Why the backend can't relay the transaction
+
+The PRD's original design (§19) has the backend accept a *signed* transaction from
+the frontend and submit it to Flashbots on the trader's behalf — the trader signs,
+the backend sends. That flow requires the wallet to sign a transaction without also
+broadcasting it (`eth_signTransaction`). **MetaMask does not support this method for
+regular accounts, and neither do most other major wallets** (Coinbase Wallet,
+WalletConnect, Rainbow) — deliberately, to stop dApps from bypassing the wallet's
+own nonce management. See
+[MetaMask/metamask-extension#3475](https://github.com/MetaMask/metamask-extension/issues/3475).
+
+Given that constraint, the only way to get a transaction to Flashbots specifically
+is for the wallet's *active RPC endpoint* to already be Flashbots' endpoint when the
+wallet does its normal sign-and-send — which is exactly what
+`components/SwapCard.tsx` does via `wallet_addEthereumChain`
+(`lib/protect.ts`'s `addProtectedNetwork`). The frontend submits directly; there was
+never a viable way to route the literal signed bytes through a backend with a
+standard browser wallet.
+
+What the backend *does* do: after the wallet returns a transaction hash,
+`SwapCard.tsx` reports it (`POST /api/submissions`) — hash, risk score, regime,
+which route was actually taken, timestamp. `GET /api/submissions` lazily resolves
+each pending row against the chain on read (no separate poller process) and the
+`/pool` dashboard's "Recent submissions" table renders the result, tagged
+`source: backend` to distinguish it from the pool tiles' `source: onchain` reads —
+this is the only place in the dashboard showing which specific swaps *actually*
+went out privately, rather than which regime they merely qualified for.
 
 ## Risk scoring pipeline
 

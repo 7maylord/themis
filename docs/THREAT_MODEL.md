@@ -50,14 +50,30 @@ the *what*.
 
 ## §26.5 — Backend threats
 
-**Mostly not applicable — Themis has no backend.** There is no server holding trader
-funds, private keys, or signed transactions in flight; the frontend talks directly to
-the trader's own wallet, the chain, and Flashbots' public RPC endpoints. The threats
-in this section (replay, leaked secrets, request forgery, rate abuse) are written for
-an architecture Themis deliberately doesn't have.
+**Mostly not applicable — the backend that exists is a record-keeper, not a
+transaction relay.** `frontend/app/api/submissions/route.ts` never holds trader
+funds, private keys, or signed transactions in flight; the wallet still submits the
+actual swap directly to the chain/Flashbots (see `docs/ARCHITECTURE.md`'s "Why the
+backend can't relay the transaction" — MetaMask and most wallets don't support
+signing without broadcasting, so a relay-style backend was never achievable). The
+API only ever receives a transaction *hash* and metadata after the fact. Most
+threats in this section (replay, leaked secrets tied to signing, request forgery
+against a fund-moving endpoint) are still written for an architecture Themis
+doesn't have.
 
-What *does* apply, in a different form:
+What *does* apply:
 
+- **Unvalidated/spam writes to `POST /api/submissions`** — the endpoint validates
+  shape (address/hex checks) but not that the caller actually sent the referenced
+  transaction. Someone could POST an arbitrary real tx hash and claim any
+  risk score/regime/route for it. Low severity: this only pollutes the *dashboard's
+  display*, never mints funds or affects on-chain state, and the real on-chain
+  events (`RiskPremiumDiverted`, `ThemisSwapObserved`) remain the authoritative
+  source for anything that matters economically — `POST /api/submissions` is
+  presentation-layer only.
+- **Local SQLite store** (`frontend/data/submissions.db`, gitignored) — no
+  secrets stored, just tx hashes and public metadata; loss or corruption only
+  affects the dashboard's history view, never funds.
 - **Deployer/operational secrets** — `PRIVATE_KEY` and `FLASHBOTS_AUTH_PRIVATE_KEY`
   exist only in a local, gitignored `.env` used for deployment scripts, never
   committed, never present in any frontend code path.
