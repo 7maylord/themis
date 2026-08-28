@@ -88,6 +88,12 @@ still needs to happen before it would be:
       `components/SwapCard.tsx` found and fixed along the way: a hydration
       mismatch that silently broke button clicks, and a silent no-op when the
       wallet was on the wrong chain.
+- [x] PRD P1 "private transaction status stored" — a minimal record-keeping
+      backend (`frontend/app/api/submissions`) now persists real route-taken
+      data per swap, closing this honestly rather than literally (a
+      relay-style backend per the PRD's original §19 design turned out to be
+      unachievable with standard wallets — see `docs/ARCHITECTURE.md`'s "Why
+      the backend can't relay the transaction").
 
 **Not done — genuinely open:**
 - [ ] **External audit.** Nothing above substitutes for one. This is the single
