@@ -2,6 +2,7 @@
 
 import { formatEther, formatUnits } from 'viem'
 
+import { RecentSubmissions } from '@/components/RecentSubmissions'
 import { CONTRACTS, POOL_ID, useTvl, usePoolStats } from '@/lib/themis'
 
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }) {
@@ -93,6 +94,8 @@ export default function PoolPage() {
           <span>RED {stats.swapCounts.red} ({pct(stats.swapCounts.red)})</span>
         </div>
       </section>
+
+      <RecentSubmissions />
 
       <p className="text-xs text-white/40">
         Hook: {CONTRACTS.HOOK} · Vault: {CONTRACTS.VAULT}
