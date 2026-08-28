@@ -8,7 +8,7 @@ import { useAccount, useConnect, useSwitchChain, useWalletClient, useWriteContra
 import { SWAP_ROUTER_ABI } from '@/lib/abis'
 import { useHasMounted } from '@/lib/hooks'
 import { addProtectedNetwork, buildProtectRpcUrl } from '@/lib/protect'
-import { CONTRACTS, POOL_KEY, REGIME_LABELS, usePreviewRisk } from '@/lib/themis'
+import { CONTRACTS, POOL_ID, POOL_KEY, REGIME_LABELS, usePreviewRisk } from '@/lib/themis'
 
 const GREEN = 0
 // Share of the risk premium routed to the vault via Flashbots' refund param —
@@ -68,13 +68,33 @@ export function SwapCard() {
 
   function submitSwap() {
     if (!address || amountWei === 0n) return
-    writeContract({
-      address: CONTRACTS.SWAP_ROUTER,
-      abi: SWAP_ROUTER_ABI,
-      functionName: 'swap',
-      args: [-amountWei, 0n, true, POOL_KEY, '0x', address, BigInt(Math.floor(Date.now() / 1000) + 3600)],
-      value: amountWei,
-    })
+    // GREEN never needs protection; otherwise it's 'protected' only if the
+    // trader actually enabled it — the decline-and-confirm path lands here
+    // too, with protectionEnabled still false, correctly recording 'public'.
+    const route: 'protected' | 'public' = !isGreen && protectionEnabled ? 'protected' : 'public'
+
+    writeContract(
+      {
+        address: CONTRACTS.SWAP_ROUTER,
+        abi: SWAP_ROUTER_ABI,
+        functionName: 'swap',
+        args: [-amountWei, 0n, true, POOL_KEY, '0x', address, BigInt(Math.floor(Date.now() / 1000) + 3600)],
+        value: amountWei,
+      },
+      {
+        onSuccess: (hash) => {
+          // Record-keeping only — the wallet already submitted the tx itself
+          // (see docs/ARCHITECTURE.md for why a backend can't relay it: most
+          // wallets don't support sign-without-broadcast). Best-effort; a
+          // failed report here must never block or roll back a real swap.
+          fetch('/api/submissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ txHash: hash, traderAddress: address, poolId: POOL_ID, riskScore: score, regime, route }),
+          }).catch(() => {})
+        },
+      },
+    )
   }
 
   // FR-013: declining protection must never itself send a transaction — it only
