@@ -4,10 +4,13 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address: '0xAD6433f3a49eb065e6470F231a3dc3Dee26F0f9d', isConnected: true, chainId: 11155111 }),
-  useConnect: () => ({ connect: vi.fn(), connectors: [] }),
   useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
   useWalletClient: () => ({ data: undefined }),
   useWriteContract: () => ({ writeContract: vi.fn(), isPending: false }),
+}))
+
+vi.mock('@privy-io/react-auth', () => ({
+  usePrivy: () => ({ login: vi.fn(), logout: vi.fn(), ready: true, authenticated: true }),
 }))
 
 // AMBER regime, forced deterministically — the real hook reads on-chain state,

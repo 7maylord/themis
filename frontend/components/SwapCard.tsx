@@ -3,11 +3,13 @@
 import { useState } from 'react'
 import { parseEther } from 'viem'
 import { sepolia } from 'wagmi/chains'
-import { useAccount, useConnect, useSwitchChain, useWalletClient, useWriteContract } from 'wagmi'
+import { useAccount, useSwitchChain, useWalletClient, useWriteContract } from 'wagmi'
+import { usePrivy } from '@privy-io/react-auth'
 
 import { SWAP_ROUTER_ABI } from '@/lib/abis'
 import { useHasMounted } from '@/lib/hooks'
 import { addProtectedNetwork, buildProtectRpcUrl } from '@/lib/protect'
+import { hasPrivyConfig } from '@/lib/privy'
 import { CONTRACTS, POOL_ID, POOL_KEY, REGIME_LABELS, usePreviewRisk } from '@/lib/themis'
 
 const GREEN = 0
@@ -16,8 +18,23 @@ const GREEN = 0
 const VAULT_REFUND_PERCENT = 80
 
 export function SwapCard() {
+  // No PrivyProvider/WagmiProvider is mounted without a configured app ID
+  // (see providers.tsx) — every hook below would throw, so bail before any of
+  // them run rather than after.
+  if (!hasPrivyConfig) {
+    return (
+      <div className="rounded-xl border border-white/10 p-6 text-sm text-white/60">
+        Wallet connection isn&apos;t configured yet — set NEXT_PUBLIC_PRIVY_APP_ID.
+      </div>
+    )
+  }
+
+  return <SwapCardInner />
+}
+
+function SwapCardInner() {
   const { address, isConnected, chainId } = useAccount()
-  const { connect, connectors } = useConnect()
+  const { login } = usePrivy()
   const { switchChain, isPending: isSwitchingChain } = useSwitchChain()
   const { data: walletClient } = useWalletClient()
   const { writeContract, isPending: isSwapping } = useWriteContract()
@@ -111,10 +128,7 @@ export function SwapCard() {
   if (!mounted || !isConnected) {
     return (
       <div className="rounded-xl border border-white/10 p-6">
-        <button
-          onClick={() => connect({ connector: connectors[0] })}
-          className="rounded-lg bg-white px-4 py-2 font-medium text-black"
-        >
+        <button onClick={login} className="rounded-lg bg-white px-4 py-2 font-medium text-black">
           Connect Wallet
         </button>
       </div>

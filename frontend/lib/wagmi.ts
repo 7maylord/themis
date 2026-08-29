@@ -1,6 +1,6 @@
-import { createConfig, http } from 'wagmi'
+import { http } from 'wagmi'
 import { sepolia } from 'wagmi/chains'
-import { injected, coinbaseWallet } from 'wagmi/connectors'
+import { createConfig } from '@privy-io/wagmi'
 
 // http() with no URL falls back to viem's bundled default RPC for the chain —
 // for Sepolia that's a shared thirdweb gateway, which has been observed
@@ -11,17 +11,15 @@ import { injected, coinbaseWallet } from 'wagmi/connectors'
 // never put an authenticated/rate-limited key behind this without a proxy.
 const SEPOLIA_RPC_URL = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com'
 
+// @privy-io/wagmi's createConfig is a drop-in replacement for wagmi's own —
+// it wires Privy's login state into wagmi's connector state instead of us
+// listing connectors (injected/coinbaseWallet/etc.) by hand; see providers.tsx
+// for where PrivyProvider wraps this config's WagmiProvider.
 export const wagmiConfig = createConfig({
   chains: [sepolia],
   transports: {
     [sepolia.id]: http(SEPOLIA_RPC_URL),
   },
-  connectors: [
-    injected(),                                  // MetaMask / browser wallet
-    coinbaseWallet({ appName: 'Themis Protected Swaps' }),
-    // walletConnect({ projectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID! }),
-  ],
-  // Disable SSR since wagmi reads localStorage for persisted state
   ssr: false,
 })
 

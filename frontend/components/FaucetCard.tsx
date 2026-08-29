@@ -5,6 +5,7 @@ import { useAccount, useBalance, useWriteContract } from 'wagmi'
 
 import { ERC20_ABI } from '@/lib/abis'
 import { useHasMounted } from '@/lib/hooks'
+import { hasPrivyConfig } from '@/lib/privy'
 import { CONTRACTS } from '@/lib/themis'
 
 // THMT's mint() is completely permissionless (solmate's MockERC20, no access
@@ -14,6 +15,14 @@ const FAUCET_AMOUNT = parseUnits('100', 18)
 const SEPOLIA_ETH_FAUCET_URL = 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia'
 
 export function FaucetCard() {
+  // No WagmiProvider is mounted without a configured Privy app ID (see
+  // providers.tsx) — the hooks below would throw, so bail out first.
+  if (!hasPrivyConfig) return null
+
+  return <FaucetCardInner />
+}
+
+function FaucetCardInner() {
   const mounted = useHasMounted()
   const { address, isConnected } = useAccount()
   const { writeContract, isPending, isSuccess } = useWriteContract()

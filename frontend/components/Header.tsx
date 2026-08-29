@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import { ConnectButton } from '@/components/ConnectButton'
+
 const LINKS = [
   { href: '/swap', label: 'Swap' },
   { href: '/pool', label: 'Pool' },
@@ -18,7 +20,7 @@ export function Header() {
         <Link href="/" className="font-semibold tracking-tight">
           Themis
         </Link>
-        <nav className="flex gap-1">
+        <nav className="flex items-center gap-1">
           {LINKS.map((link) => (
             <Link
               key={link.href}
@@ -30,6 +32,9 @@ export function Header() {
               {link.label}
             </Link>
           ))}
+          <div className="ml-2">
+            <ConnectButton />
+          </div>
         </nav>
       </div>
     </header>
