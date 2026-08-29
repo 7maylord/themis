@@ -21,7 +21,14 @@ import { insertSubmission, listSubmissions, markFailed, markIncluded, type Submi
 // fan-out) exist to keep that display-only surface from being trivially
 // spammable or used to hammer the upstream RPC provider.
 
-const publicClient = createPublicClient({ chain: sepolia, transport: http(process.env.SEPOLIA_RPC_URL) })
+// Falls back to a known-reliable public endpoint if SEPOLIA_RPC_URL isn't set —
+// http(undefined) would otherwise silently use viem's bundled default RPC,
+// which has been observed failing outright (see lib/wagmi.ts for the same fix
+// on the client side).
+const publicClient = createPublicClient({
+  chain: sepolia,
+  transport: http(process.env.SEPOLIA_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com'),
+})
 
 // In-memory sliding-window limiter — fine for a single-instance demo deployment;
 // would need a shared store (e.g. Redis) behind a real multi-instance deployment.

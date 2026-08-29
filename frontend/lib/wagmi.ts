@@ -2,12 +2,19 @@ import { createConfig, http } from 'wagmi'
 import { sepolia } from 'wagmi/chains'
 import { injected, coinbaseWallet } from 'wagmi/connectors'
 
+// http() with no URL falls back to viem's bundled default RPC for the chain —
+// for Sepolia that's a shared thirdweb gateway, which has been observed
+// failing outright ("Failed to fetch"). Pointing at a specific, no-API-key
+// public endpoint explicitly avoids depending on whichever default viem
+// happens to ship. NEXT_PUBLIC_SEPOLIA_RPC_URL can override this with a
+// private/faster endpoint — note anything here is exposed to the browser, so
+// never put an authenticated/rate-limited key behind this without a proxy.
+const SEPOLIA_RPC_URL = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com'
+
 export const wagmiConfig = createConfig({
   chains: [sepolia],
   transports: {
-    [sepolia.id]: http(),
-    // Override with a private RPC for production:
-    // [sepolia.id]: http(process.env.NEXT_PUBLIC_RPC_URL),
+    [sepolia.id]: http(SEPOLIA_RPC_URL),
   },
   connectors: [
     injected(),                                  // MetaMask / browser wallet
