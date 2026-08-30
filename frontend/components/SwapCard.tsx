@@ -44,6 +44,8 @@ function SwapCardInner() {
   const [protectionPending, setProtectionPending] = useState(false)
   const [protectionError, setProtectionError] = useState<string | null>(null)
   const [publicWarningShown, setPublicWarningShown] = useState(false)
+  const [lastTx, setLastTx] = useState<{ hash: string; route: 'protected' | 'public' } | null>(null)
+  const [swapError, setSwapError] = useState<string | null>(null)
 
   const mounted = useHasMounted()
 
@@ -62,6 +64,7 @@ function SwapCardInner() {
     setProtectionEnabled(false)
     setProtectionError(null)
     setPublicWarningShown(false)
+    setSwapError(null)
   }
 
   async function handleEnableProtection() {
@@ -89,6 +92,7 @@ function SwapCardInner() {
     // trader actually enabled it — the decline-and-confirm path lands here
     // too, with protectionEnabled still false, correctly recording 'public'.
     const route: 'protected' | 'public' = !isGreen && protectionEnabled ? 'protected' : 'public'
+    setSwapError(null)
 
     writeContract(
       {
@@ -100,6 +104,7 @@ function SwapCardInner() {
       },
       {
         onSuccess: (hash) => {
+          setLastTx({ hash, route })
           // Record-keeping only — the wallet already submitted the tx itself
           // (see docs/ARCHITECTURE.md for why a backend can't relay it: most
           // wallets don't support sign-without-broadcast). Best-effort; a
@@ -109,6 +114,9 @@ function SwapCardInner() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ txHash: hash, traderAddress: address, poolId: POOL_ID, riskScore: score, regime, route }),
           }).catch(() => {})
+        },
+        onError: (err) => {
+          setSwapError(err instanceof Error ? err.message : 'Swap failed')
         },
       },
     )
@@ -228,6 +236,28 @@ function SwapCardInner() {
       >
         {isSwapping ? 'Swapping…' : 'Swap'}
       </button>
+
+      {swapError && (
+        <p role="alert" className="text-sm text-red-400">
+          {swapError}
+        </p>
+      )}
+
+      {lastTx && (
+        <div data-testid="swap-confirmation" className="rounded-lg border border-emerald-500/40 p-3 text-sm">
+          <p className="text-emerald-400">
+            Swap submitted {lastTx.route === 'protected' ? 'via Flashbots Protect' : 'to the public mempool'}.
+          </p>
+          <a
+            href={`https://sepolia.etherscan.io/tx/${lastTx.hash}`}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-block font-mono underline"
+          >
+            {lastTx.hash.slice(0, 10)}…{lastTx.hash.slice(-8)} ↗
+          </a>
+        </div>
+      )}
     </div>
   )
 }
