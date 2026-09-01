@@ -109,7 +109,17 @@ still needs to happen before it would be:
       stand-in for the delivery leg, not a real landed bundle. Worth re-attempting
       once (or if) Flashbots' Sepolia infrastructure recovers, and separately
       worth proving on mainnet, where the relay is demonstrably reliable in
-      production.
+      production. Re-tested 2026-09-01 with a fresh backrun + 100-block-targeted
+      bundle (`script/searcher/Backrun.s.sol` + `send-bundle.ts`): relay accepted
+      every submission cleanly (valid `bundleHash`, zero relay errors — ruling out
+      a signature/submission bug on our end), but the bundle still landed in none
+      of the 100 targeted blocks. Per Flashbots' own troubleshooting docs this is
+      consistent with validator/mev-boost participation on Sepolia being too low
+      for reliable targeting, not a code-level bug — see
+      [flashbots/rbuilder#862](https://github.com/flashbots/rbuilder/issues/862)
+      for the closest tracked (open, unresolved) upstream report, though its
+      symptom (a signature rejection) doesn't match ours (clean acceptance, no
+      inclusion).
 - [ ] **Real token pair economics.** The mainnet-fork simulation (`docs/ECONOMICS.md`)
       uses a fresh `MockERC20`, not an existing liquid pair — real trading behavior
       against genuine market depth and real MEV searcher competition has not been
