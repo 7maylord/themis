@@ -106,20 +106,34 @@ still needs to happen before it would be:
 - [ ] **Live Flashbots MEV-refund stream, proven end-to-end.** Task 10 found a
       confirmed relay→builder pipeline gap on Sepolia's `eth_sendBundle` relay;
       the second FairShare value stream has only been proven via a labeled
-      stand-in for the delivery leg, not a real landed bundle. Worth re-attempting
-      once (or if) Flashbots' Sepolia infrastructure recovers, and separately
-      worth proving on mainnet, where the relay is demonstrably reliable in
-      production. Re-tested 2026-09-01 with a fresh backrun + 100-block-targeted
-      bundle (`script/searcher/Backrun.s.sol` + `send-bundle.ts`): relay accepted
-      every submission cleanly (valid `bundleHash`, zero relay errors — ruling out
-      a signature/submission bug on our end), but the bundle still landed in none
-      of the 100 targeted blocks. Per Flashbots' own troubleshooting docs this is
-      consistent with validator/mev-boost participation on Sepolia being too low
-      for reliable targeting, not a code-level bug — see
+      stand-in for the delivery leg, not a real landed bundle. Re-tested
+      2026-09-01 with a fresh backrun + 100-block-targeted bundle
+      (`script/searcher/Backrun.s.sol` + `send-bundle.ts`): relay accepted every
+      submission cleanly (valid `bundleHash`, zero relay errors — ruling out a
+      signature/submission bug on our end), but the bundle still landed in none
+      of the 100 targeted blocks. Closest tracked upstream report:
       [flashbots/rbuilder#862](https://github.com/flashbots/rbuilder/issues/862)
-      for the closest tracked (open, unresolved) upstream report, though its
-      symptom (a signature rejection) doesn't match ours (clean acceptance, no
-      inclusion).
+      (open, unresolved), though its symptom (a signature rejection) doesn't
+      match ours (clean acceptance, no inclusion).
+      <br><br>
+      **Why we believe this is Sepolia-specific, not a Themis bug** — three
+      independent, cited findings: (1) Flashbots' own testnet docs give this
+      exact explanation for non-inclusion: *"Flashbots only runs a small
+      portion of the validators on [testnet]"* (docs.flashbots.net/flashbots-auction/advanced/testnets).
+      (2) In Dec 2024 Flashbots deprecated its centralized mainnet builder
+      entirely and migrated all bundle orderflow to **BuilderNet**, a
+      decentralized block-building network — per live mainnet data
+      ([relayscan.io](https://relayscan.io/overview), 2026-09-01, 24h window)
+      BuilderNet currently wins **18.69%** of mainnet blocks (2nd largest
+      builder), a real, actively-competitive share. (3) Flashbots' Sepolia docs
+      make no mention of BuilderNet — Sepolia's `relay-sepolia.flashbots.net`
+      appears to still run on the older, low-participation path mainnet moved
+      away from. Net effect: mainnet bundle orderflow is backed by
+      infrastructure with genuine, current validator reach; Sepolia's isn't —
+      a real, evidenced, structural gap, not just an assumption. This has
+      *not* been verified by an actual mainnet bundle test (that requires real
+      mainnet ETH and hasn't been run), so treat it as strong circumstantial
+      evidence, not proof.
 - [ ] **Real token pair economics.** The mainnet-fork simulation (`docs/ECONOMICS.md`)
       uses a fresh `MockERC20`, not an existing liquid pair — real trading behavior
       against genuine market depth and real MEV searcher competition has not been
