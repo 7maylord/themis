@@ -31,13 +31,11 @@ contract ThemisIntegrationTest is BaseTest {
     ThemisHook hook;
     FairShareVault vault;
 
-    // Themis pool
     Currency tCurrency1;
     PoolKey tKey;
     PoolId tPoolId;
     uint256 tTokenId;
 
-    // Vanilla comparison pool: identical config, no hook.
     Currency vCurrency1;
     PoolKey vKey;
     PoolId vPoolId;
@@ -91,8 +89,6 @@ contract ThemisIntegrationTest is BaseTest {
         );
     }
 
-    /// @dev amountLimit is the minimum output for exact-input, maximum input for
-    ///      exact-output — callers pass whichever bound matters for their scenario.
     function _swap(PoolKey memory key, int256 amountSpecified, bool zeroForOne, uint256 amountLimit)
         internal
         returns (BalanceDelta)
@@ -107,10 +103,6 @@ contract ThemisIntegrationTest is BaseTest {
         );
     }
 
-    /// @dev Drives the Themis pool into AMBER with one calibration swap. 20e18
-    ///      against 1_000e18 liquidity lands at score ~55 (comfortably inside the
-    ///      35-69 AMBER band, 15 points clear of RED) — found empirically via
-    ///      previewRisk since the score curve isn't linear in swap size.
     function _driveThemisPoolToAmber() internal {
         _swap(tKey, -1e15, true, 0);
         vm.roll(block.number + 1);
@@ -120,9 +112,6 @@ contract ThemisIntegrationTest is BaseTest {
         vm.roll(block.number + 1);
     }
 
-    // ─── GREEN ──────────────────────────────────────────────────────────────────
-
-    /// WHY: this is the headline product claim — calm flow must be untouched.
     function test_greenSwap_divertsNothing() public {
         BalanceDelta tDelta = _swap(tKey, -1e15, true, 0);
         BalanceDelta vDelta = _swap(vKey, -1e15, true, 0);
@@ -131,11 +120,6 @@ contract ThemisIntegrationTest is BaseTest {
         assertEq(vault.pendingForPool(tPoolId, tCurrency1), 0);
     }
 
-    /// @dev Isolated afterSwap gas overhead Themis adds on a GREEN swap relative to
-    ///      a vanilla pool with no hook — the "protection overhead" denominator spec
-    ///      §25 refers to. Logged, not asserted against a hard threshold (gas costs
-    ///      shift with compiler/optimizer versions) — see docs/ARCHITECTURE.md for
-    ///      the figure recorded from this run.
     function test_gasOverhead_afterSwapOnGreenSwap() public {
         uint256 gasBeforeVanilla = gasleft();
         _swap(vKey, -1e15, true, 0);
@@ -150,8 +134,6 @@ contract ThemisIntegrationTest is BaseTest {
         console.log("afterSwap overhead (gas):", themisGas - vanillaGas);
     }
 
-    // ─── AMBER diversion ────────────────────────────────────────────────────────
-
     function test_amberSwap_divertsPremiumToVault() public {
         _driveThemisPoolToAmber();
 
@@ -162,8 +144,6 @@ contract ThemisIntegrationTest is BaseTest {
         _assertEventEmitted("RiskPremiumDiverted(bytes32,address,uint256,uint32)");
     }
 
-    /// WHY: catches an internal-consistency regression in the premium formula itself
-    /// — the diverted amount must exactly match ppm(actualPostSwapScore) * notional.
     function test_divertedAmountMatchesPremiumPpm() public {
         _driveThemisPoolToAmber();
 
@@ -171,8 +151,6 @@ contract ThemisIntegrationTest is BaseTest {
         BalanceDelta tDelta = _swap(tKey, -10e18, true, 0);
         uint256 diverted = vault.pendingForPool(tPoolId, tCurrency1) - vaultBalanceBefore;
 
-        // Reconstruct the pre-diversion notional: the swapper's actual output was
-        // (rawOutput - diverted), so rawOutput = actual + diverted.
         uint256 actualOutput = uint256(int256(tDelta.amount1()));
         uint256 rawNotional = actualOutput + diverted;
 
@@ -183,11 +161,6 @@ contract ThemisIntegrationTest is BaseTest {
         assertEq(diverted, expectedDiverted);
     }
 
-    /// WHY: _divertPremium's `if (premium == 0) return 0;` guard was never exercised
-    /// by any other test — every other AMBER swap uses a notional large enough that
-    /// notional*ppm/1e6 is comfortably nonzero. A 1-wei-input swap, still in AMBER
-    /// from calibration, produces a notional small enough that mulDiv floors to 0:
-    /// the swap must still succeed cleanly with no diversion and no event, not revert.
     function test_divertPremium_roundsDownToZeroForTinyNotional() public {
         _driveThemisPoolToAmber();
         uint256 pendingBefore = vault.pendingForPool(tPoolId, tCurrency1);
@@ -203,20 +176,12 @@ contract ThemisIntegrationTest is BaseTest {
         }
     }
 
-    /// WHY: eleos only implements the currency1 branch; copying that limitation
-    /// would silently drop the premium on half of all swaps.
-    /// @dev Snapshot is taken AFTER calibration, so the baseline already has nonzero
-    ///      tCurrency1 pending (the calibration swap is itself zeroForOne+exactInput).
-    ///      Each case must therefore assert against that baseline — not against zero
-    ///      — and must also assert the OTHER currency is untouched, or a test could
-    ///      pass "by accident" off the calibration swap's own leftover credit.
     function test_divert_worksForAllFourSwapDirections() public {
         _driveThemisPoolToAmber();
         uint256 snapshot = vm.snapshotState();
         uint256 baseline1 = vault.pendingForPool(tPoolId, tCurrency1);
         uint256 baseline0 = vault.pendingForPool(tPoolId, CurrencyLibrary.ADDRESS_ZERO);
 
-        // zeroForOne=true, exact input → unspecified=currency1 (zeroForOne==exactInput)
         _swap(tKey, -10e18, true, 0);
         assertGt(vault.pendingForPool(tPoolId, tCurrency1), baseline1, "zeroForOne exactIn: currency1");
         assertEq(
@@ -226,7 +191,6 @@ contract ThemisIntegrationTest is BaseTest {
         );
         vm.revertToState(snapshot);
 
-        // zeroForOne=false, exact input → unspecified=currency0 (zeroForOne!=exactInput)
         _swap(tKey, -10e18, false, 0);
         assertGt(
             vault.pendingForPool(tPoolId, CurrencyLibrary.ADDRESS_ZERO), baseline0, "oneForZero exactIn: currency0"
@@ -234,10 +198,6 @@ contract ThemisIntegrationTest is BaseTest {
         assertEq(vault.pendingForPool(tPoolId, tCurrency1), baseline1, "oneForZero exactIn: currency1 untouched");
         vm.revertToState(snapshot);
 
-        // zeroForOne=true, exact output → unspecified=currency0 (zeroForOne!=exactInput).
-        // Sized comparably to the exact-input cases (~10e18) — a much smaller output
-        // request has negligible size/impact contribution of its own and can fall
-        // back below the AMBER threshold even with calibration's carried-over state.
         _swap(tKey, 10e18, true, 50e18);
         assertGt(
             vault.pendingForPool(tPoolId, CurrencyLibrary.ADDRESS_ZERO), baseline0, "zeroForOne exactOut: currency0"
@@ -245,7 +205,6 @@ contract ThemisIntegrationTest is BaseTest {
         assertEq(vault.pendingForPool(tPoolId, tCurrency1), baseline1, "zeroForOne exactOut: currency1 untouched");
         vm.revertToState(snapshot);
 
-        // zeroForOne=false, exact output → unspecified=currency1 (zeroForOne==exactInput, both false)
         _swap(tKey, 10e18, false, 50e18);
         assertGt(vault.pendingForPool(tPoolId, tCurrency1), baseline1, "oneForZero exactOut: currency1");
         assertEq(
@@ -255,8 +214,6 @@ contract ThemisIntegrationTest is BaseTest {
         );
     }
 
-    /// WHY: the router's amountOutMinimum still bounds the trader — the premium
-    /// must not silently under-deliver past what the trader authorized.
     function test_premiumRespectsSlippageBound() public {
         _driveThemisPoolToAmber();
         uint256 snapshot = vm.snapshotState();
@@ -270,8 +227,6 @@ contract ThemisIntegrationTest is BaseTest {
         _swap(tKey, -10e18, true, actualOutput + 1);
     }
 
-    /// WHY: this is the entire thesis — if this test can pass without value
-    /// reaching LPs, the test is wrong.
     function test_endToEnd_premiumReachesLps() public {
         _swap(tKey, -1e15, true, 0);
         _swap(vKey, -1e15, true, 0);
@@ -293,19 +248,15 @@ contract ThemisIntegrationTest is BaseTest {
         assertGt(tOut.amount1(), vOut.amount1());
     }
 
-    // ─── Pause degrades, never bricks ──────────────────────────────────────────
-
     function test_pausedHook_divertsNothingButSwapsStillSucceed() public {
-        _driveThemisPoolToAmber(); // its own calibration swap already diverts a premium
+        _driveThemisPoolToAmber();
         uint256 baseline = vault.pendingForPool(tPoolId, tCurrency1);
         hook.pause();
 
-        _swap(tKey, -10e18, true, 0); // must not revert
+        _swap(tKey, -10e18, true, 0);
 
         assertEq(vault.pendingForPool(tPoolId, tCurrency1), baseline);
     }
-
-    // ─── helpers ────────────────────────────────────────────────────────────────
 
     function _assertEventEmitted(string memory signature) internal view {
         bytes32 topic0 = keccak256(bytes(signature));

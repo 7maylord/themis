@@ -5,8 +5,6 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 
-/// @title IFairShareVault
-/// @notice Accrues risk-premium and Flashbots-refund value, and returns both to LPs.
 interface IFairShareVault {
     event HookSet(address hook);
     event PoolRegistered(PoolId indexed poolId, Currency currency0, Currency currency1);

@@ -15,17 +15,6 @@ import {AddressConstants} from "hookmate/constants/AddressConstants.sol";
 
 import {Deployers} from "test/utils/Deployers.sol";
 
-/// @notice Shared configuration between scripts.
-///         Token and hook addresses are read from environment variables so no Solidity
-///         edits are needed between deployments.
-///
-///   TOKEN1_ADDRESS   — address of the ERC-20 paired against native ETH. There is no
-///                      TOKEN0_ADDRESS: Themis pools always use native ETH as
-///                      currency0 (see getCurrencies() below) — token0 stays
-///                      declared (unset, address(0)) purely because LiquidityHelpers
-///                      is shared infrastructure that already guards on
-///                      currency0.isAddressZero() before ever touching it.
-///   THEMIS_HOOK_ADDRESS — deployed ThemisHook address (set after 00_DeployThemis runs)
 contract BaseScript is Script, Deployers {
     address immutable deployerAddress;
 
@@ -41,7 +30,6 @@ contract BaseScript is Script, Deployers {
         token1 = IERC20(vm.envOr("TOKEN1_ADDRESS", address(0)));
         hookContract = IHooks(vm.envOr("THEMIS_HOOK_ADDRESS", address(0)));
 
-        // Make sure artifacts are available, either deploy or configure.
         deployArtifacts();
 
         deployerAddress = getDeployer();

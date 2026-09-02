@@ -30,8 +30,8 @@ contract ThemisHookTest is BaseTest {
     ThemisHook hook;
     FairShareVault vault;
 
-    Currency currency0; // native ETH
-    Currency currency1; // ERC-20
+    Currency currency0;
+    Currency currency1;
 
     PoolKey poolKey;
     PoolId poolId;
@@ -89,15 +89,10 @@ contract ThemisHookTest is BaseTest {
         );
     }
 
-    /// @dev Every call site in this file is exact-input (amountSpecified < 0), so
-    ///      amountLimit (the minimum acceptable output) is always 0 — no slippage
-    ///      protection needed for these unit tests.
     function _swap(int256 amountSpecified, bool zeroForOne) internal {
         uint256 value = (zeroForOne && amountSpecified < 0) ? uint256(-amountSpecified) : 0;
         swapRouter.swap{value: value}(amountSpecified, 0, zeroForOne, poolKey, "", address(this), block.timestamp + 60);
     }
-
-    // ─── Permissions ────────────────────────────────────────────────────────────
 
     function test_hookPermissions_areExactlyAfterSwapAndReturnDelta() public view {
         Hooks.Permissions memory p = hook.getHookPermissions();
@@ -117,16 +112,12 @@ contract ThemisHookTest is BaseTest {
         assertFalse(p.afterRemoveLiquidityReturnDelta);
     }
 
-    // ─── Initial state ──────────────────────────────────────────────────────────
-
     function test_initialState_isGreenWithZeroScore() public view {
         IThemisHook.RiskState memory st = hook.getRiskState(poolId);
         assertEq(st.riskScore, 0);
         assertEq(st.regime, ThemisRisk.GREEN);
         assertEq(st.lastSqrtPrice, 0);
     }
-
-    // ─── afterSwap ──────────────────────────────────────────────────────────────
 
     function test_afterSwap_setsLastSqrtPriceOnFirstSwap() public {
         _swap(-1e15, true);
@@ -135,10 +126,10 @@ contract ThemisHookTest is BaseTest {
     }
 
     function test_afterSwap_raisesVolatilityOnLargePriceMove() public {
-        _swap(-1e15, true); // first swap: records lastSqrtPrice, volatility stays 0
+        _swap(-1e15, true);
         vm.roll(block.number + 1);
 
-        _swap(-50e18, true); // large move relative to liquidity
+        _swap(-50e18, true);
         IThemisHook.RiskState memory st = hook.getRiskState(poolId);
         assertGt(st.volatilityScore, 0);
     }
@@ -149,11 +140,8 @@ contract ThemisHookTest is BaseTest {
         assertEq(st.regime, ThemisRisk.GREEN);
     }
 
-    /// WHY (spec §9.7): without this, a searcher spikes and reverts volatility inside
-    /// one block to force a regime they want. Two swaps in one block must produce
-    /// at most one VolatilityUpdated.
     function test_afterSwap_onlyUpdatesVolatilityOncePerBlock() public {
-        _swap(-1e15, true); // first-ever swap: sets lastSqrtPrice, no vol event yet
+        _swap(-1e15, true);
         vm.roll(block.number + 1);
 
         vm.recordLogs();
@@ -169,15 +157,8 @@ contract ThemisHookTest is BaseTest {
         assertEq(count, 1);
     }
 
-    // ─── previewRisk ────────────────────────────────────────────────────────────
-
-    /// WHY: the UI quotes from previewRisk; if it disagrees with what the swap
-    /// actually charges, every quote is a lie. Volatility and impact must match
-    /// exactly (mirrors SwapMath's fee deduction; trade is small relative to the
-    /// wide tick range so there's no crossing to diverge on) — only flow intensity
-    /// gets a bounded tolerance, justified below.
     function test_previewRisk_matchesPostSwapStateForSameTrade() public {
-        _swap(-1e15, true); // establish lastSqrtPrice so impact isn't trivially zero
+        _swap(-1e15, true);
         vm.roll(block.number + 1);
 
         int256 amountSpecified = -5e18;
@@ -186,13 +167,6 @@ contract ThemisHookTest is BaseTest {
         _swap(amountSpecified, true);
         IThemisHook.RiskState memory st = hook.getRiskState(poolId);
 
-        // Volatility and impact are forecast from the same estimated price move
-        // previewRisk uses internally, so they match the real swap exactly here (no
-        // fee mismatch, no tick-crossing). Flow intensity is the one dimension that
-        // is structurally unknowable in advance — a swap's own arrival can't be
-        // foreseen before it lands — bounded by ceil(FLOW_ALPHA_BPS/BPS * W_FLOW)
-        // = ceil(0.30 * 15) = 5, the worst-case single-swap contribution to the
-        // composite score from the flow term alone (see ThemisHook.FLOW_ALPHA_BPS).
         assertApproxEqAbs(uint256(previewScore), uint256(st.riskScore), 5);
         assertEq(previewRegime, st.regime);
     }
@@ -203,11 +177,6 @@ contract ThemisHookTest is BaseTest {
         assertTrue(ok);
     }
 
-    /// WHY: every other previewRisk test uses exact-input (negative amountSpecified)
-    /// — _estimateNextSqrtPrice's exact-output branch (getNextSqrtPriceFromOutput)
-    /// was never exercised by anything. A real quote UI calls this for exact-output
-    /// swaps too (e.g. "I want exactly 1 ETH out"), so it must not revert or produce
-    /// a nonsensical score.
     function test_previewRisk_exactOutput_doesNotRevert() public {
         _swap(-1e15, true);
         vm.roll(block.number + 1);
@@ -217,26 +186,22 @@ contract ThemisHookTest is BaseTest {
         assertTrue(regime == ThemisRisk.GREEN || regime == ThemisRisk.AMBER || regime == ThemisRisk.RED);
     }
 
-    // ─── Hysteresis ─────────────────────────────────────────────────────────────
-
     function test_regimeTransition_respectsHysteresis() public {
         _swap(-1e15, true);
         vm.roll(block.number + 1);
 
-        _swap(-80e18, true); // push toward AMBER
+        _swap(-80e18, true);
         IThemisHook.RiskState memory st = hook.getRiskState(poolId);
         uint8 regimeAfterBigSwap = st.regime;
 
         vm.roll(block.number + 1);
-        _swap(-1e15, true); // tiny swap; regime should not snap straight back to GREEN
+        _swap(-1e15, true);
         st = hook.getRiskState(poolId);
 
         if (regimeAfterBigSwap == ThemisRisk.AMBER) {
             assertTrue(st.regime == ThemisRisk.AMBER || st.regime == ThemisRisk.GREEN);
         }
     }
-
-    // ─── Multi-pool isolation ───────────────────────────────────────────────────
 
     function test_multiplePools_haveIndependentState() public {
         Currency otherCurrency1 = Currency.wrap(address(deployToken()));
@@ -275,8 +240,6 @@ contract ThemisHookTest is BaseTest {
         assertEq(stOther.riskScore, 0);
     }
 
-    // ─── Owner setters ──────────────────────────────────────────────────────────
-
     function test_setAlphaBps_revertsAboveBps() public {
         vm.expectRevert();
         hook.setAlphaBps(ThemisRisk.BPS + 1);
@@ -305,9 +268,6 @@ contract ThemisHookTest is BaseTest {
         assertEq(hook.flowFullScale(), 444);
     }
 
-    /// WHY: a zero full-scale would make normalize() divide by zero territory —
-    /// ThemisRisk.normalize already guards that, but the setter should never let a
-    /// misconfiguration reach it in the first place.
     function test_setFullScales_revertsOnZeroValue() public {
         vm.expectRevert("full scale");
         hook.setFullScales(0, 222, 333, 444);
@@ -324,19 +284,12 @@ contract ThemisHookTest is BaseTest {
         vm.stopPrank();
     }
 
-    // ─── pause() / unpause() ────────────────────────────────────────────────────
-
-    /// @dev Pausing/unpausing the hook itself is exercised end-to-end (diversion
-    ///      on/off) by ThemisIntegration.t.sol; this just confirms unpause() flips
-    ///      the flag Pausable exposes, which nothing else directly asserts.
     function test_unpause_clearsPausedState() public {
         hook.pause();
         assertTrue(hook.paused());
         hook.unpause();
         assertFalse(hook.paused());
     }
-
-    // ─── Fuzz ───────────────────────────────────────────────────────────────────
 
     function testFuzz_riskScoreAlwaysInDomain(int128 amount, bool zeroForOne) public {
         int256 amountSpecified = -int256(uint256(bound(uint128(amount), 1e12, 500e18)));

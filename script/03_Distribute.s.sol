@@ -8,16 +8,6 @@ import {BaseScript} from "./base/BaseScript.sol";
 
 import {FairShareVault} from "../src/FairShareVault.sol";
 
-/// @notice Triggers FairShareVault.distribute() for the Themis pool, donating all
-///         pending value (risk premium + any attributed Flashbots refunds) to LPs.
-///         Permissionless on the vault itself — this script is just a convenient way
-///         to trigger it manually rather than waiting for a bot/frontend to.
-///
-/// Requires in .env: FAIR_SHARE_VAULT_ADDRESS, POOL_ID.
-///
-/// Usage:
-///   forge script script/03_Distribute.s.sol \
-///     --rpc-url $SEPOLIA_RPC_URL --account themis-deployer --broadcast
 contract DistributeScript is BaseScript {
     function run() external {
         FairShareVault vault = FairShareVault(payable(vm.envAddress("FAIR_SHARE_VAULT_ADDRESS")));

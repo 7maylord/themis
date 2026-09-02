@@ -9,9 +9,6 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.priceReturnBps(1 << 96, 1 << 96), 0);
     }
 
-    /// WHY: risk must react to a move in either direction. Note the function is
-    /// deliberately NOT symmetric — |new²/prev² − 1| ≠ |prev²/new² − 1| — so assert
-    /// that both directions register, not that they are equal.
     function test_priceReturnBps_registersBothDirections() public pure {
         uint256 base = 1 << 96;
         uint160 a = uint160(base);
@@ -20,8 +17,6 @@ contract ThemisRiskTest is Test {
         assertGt(ThemisRisk.priceReturnBps(b, a), 0);
     }
 
-    /// A price doubling is a 10_000 bps move. sqrtPrice scales as √price, so a
-    /// √2× sqrtPrice is a 2× price.
     function test_priceReturnBps_doublingIsTenThousandBps() public pure {
         uint160 prev = uint160(1 << 96);
         uint160 next = uint160(uint256(1 << 96) * 14142 / 10000);
@@ -37,25 +32,15 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.ewma(500, 9000, 0), 500);
     }
 
-    /// WHY: no current caller ever passes alpha > BPS (ThemisHook.setAlphaBps and
-    /// the FLOW_ALPHA_BPS constant both stay within bounds by construction), so this
-    /// clamp was never exercised by anything else. It's still load-bearing defense —
-    /// pins that ewma() clamps an out-of-range alpha to 100% rather than producing a
-    /// nonsensical weighted average if a future caller ever passes one unchecked.
     function test_ewma_clampsAlphaAboveBps() public pure {
         assertEq(ThemisRisk.ewma(500, 9000, ThemisRisk.BPS + 5000), ThemisRisk.ewma(500, 9000, ThemisRisk.BPS));
     }
 
-    /// WHY: a slow alpha must not let one block's spike dominate the regime.
-    /// At alpha=10%, a 100x spike from a calm base must stay under the AMBER premium ramp.
     function test_ewma_dampensSingleSpike() public pure {
         uint256 v = ThemisRisk.ewma(100, 10_000, 1_000);
         assertLt(v, 1_200);
     }
 
-    /// WHY: sampleBps can legitimately be type(uint256).max — priceReturnBps's own
-    /// H-1 overflow guard returns exactly that for extreme tick-range moves. A raw
-    /// `alphaBps * sampleBps` would overflow and revert; this pins that it doesn't.
     function test_ewma_extremeSampleDoesNotRevert() public pure {
         uint256 v = ThemisRisk.ewma(1000, type(uint256).max, 9999);
         assertGt(v, 0);
@@ -73,8 +58,6 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.normalize(500, 0), 0);
     }
 
-    /// WHY: weights are the product's economic policy (30/25/30/15). If someone
-    /// retunes them, this test must fail loudly rather than silently reprice flow.
     function test_composite_appliesDocumentedWeights() public pure {
         assertEq(ThemisRisk.composite(100, 0, 0, 0), 30);
         assertEq(ThemisRisk.composite(0, 100, 0, 0), 25);
@@ -83,18 +66,10 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.composite(100, 100, 100, 100), 100);
     }
 
-    /// WHY: the weights sum to exactly 100, so any caller passing already-normalized
-    /// [0,100] scores can never mathematically exceed 100 — this clamp is dead code
-    /// under every current caller (all four scores go through normalize() first).
-    /// It's still a real defensive bound worth locking in: composite() accepts raw
-    /// uint32 and does not itself enforce [0,100] on its inputs, so a future caller
-    /// skipping normalize() must still get a clamped, not overflowing-looking, result.
     function test_composite_clampsWhenInputExceedsMax() public pure {
         assertEq(ThemisRisk.composite(1000, 0, 0, 0), ThemisRisk.MAX_SCORE);
     }
 
-    /// WHY: without hysteresis a trader can straddle the boundary to flip
-    /// themselves back to GREEN pricing on alternating swaps.
     function test_nextRegime_hysteresisBand() public pure {
         assertEq(ThemisRisk.nextRegime(30, ThemisRisk.GREEN), ThemisRisk.GREEN);
         assertEq(ThemisRisk.nextRegime(35, ThemisRisk.GREEN), ThemisRisk.AMBER);
@@ -105,7 +80,6 @@ contract ThemisRiskTest is Test {
         assertEq(ThemisRisk.nextRegime(65, ThemisRisk.RED), ThemisRisk.RED);
     }
 
-    /// WHY: the product promise is that calm flow is never surcharged.
     function test_premiumPpm_isZeroBelowAmber() public pure {
         assertEq(ThemisRisk.premiumPpm(0, 2500), 0);
         assertEq(ThemisRisk.premiumPpm(34, 2500), 0);
@@ -140,16 +114,11 @@ contract ThemisRiskTest is Test {
         assertGe(v, prev < sample ? prev : sample);
     }
 
-    /// WHY: regression pin for the H-1 overflow guard — squaring sqrtRatio near the
-    /// tick-range extremes overflows FullMath.mulDiv's uint256 result. A thin pool can
-    /// genuinely move a single swap from MIN to MAX sqrtPrice, so this must clamp, not revert.
     function test_priceReturnBps_extremeRangeClampsInsteadOfReverting() public pure {
         uint160 minSqrt = 4295128739;
         uint160 maxSqrt = 1461446703485210103287273052203988822378723970342;
         assertEq(ThemisRisk.priceReturnBps(minSqrt, maxSqrt), type(uint256).max);
-        // Reverse direction: sqrtRatio truncates to 0 (minSqrt/maxSqrt is far below
-        // integer-division resolution), so this saturates at a 100% move instead of
-        // hitting the overflow guard — both directions of an extreme move are covered.
+
         assertEq(ThemisRisk.priceReturnBps(maxSqrt, minSqrt), ThemisRisk.BPS);
     }
 

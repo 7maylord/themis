@@ -14,24 +14,14 @@ import {LiquidityHelpers} from "./base/LiquidityHelpers.sol";
 
 import {FairShareVault} from "../src/FairShareVault.sol";
 
-/// @notice Creates the ETH/TOKEN1 Themis pool (fee 500, tickSpacing 10, full-range
-///         liquidity, 1:1 starting price) and registers it with FairShareVault.
-///
-/// Requires in .env: TOKEN1_ADDRESS, THEMIS_HOOK_ADDRESS, FAIR_SHARE_VAULT_ADDRESS.
-///
-/// Usage:
-///   forge script script/01_CreatePoolAndAddLiquidity.s.sol \
-///     --rpc-url $SEPOLIA_RPC_URL --account themis-deployer --broadcast
 contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
     using CurrencyLibrary for Currency;
     using PoolIdLibrary for PoolKey;
 
-    uint24 constant LP_FEE = 500; // 0.05% — Global Constraints base pool fee
+    uint24 constant LP_FEE = 500;
     int24 constant TICK_SPACING = 10;
     uint160 constant STARTING_PRICE = Constants.SQRT_PRICE_1_1;
 
-    // Modest testnet amounts — equal nominal value at the 1:1 starting price so
-    // neither side bottlenecks the liquidity math.
     uint256 public token0Amount = 0.02 ether;
     uint256 public token1Amount = 0.02e18;
 
@@ -59,8 +49,6 @@ contract CreatePoolAndAddLiquidityScript is BaseScript, LiquidityHelpers {
         uint256 amount0Max = token0Amount + 1;
         uint256 amount1Max = token1Amount + 1;
 
-        // ThemisHook has no beforeAddLiquidity/afterAddLiquidity permissions, so
-        // hookData is never read on this path — leave it empty.
         (bytes memory actions, bytes[] memory mintParams) =
             _mintLiquidityParams(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, deployerAddress, "");
 

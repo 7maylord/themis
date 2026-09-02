@@ -37,14 +37,12 @@ contract EasyPosmTest is Test, BaseTest {
 
         (currency0, currency1) = deployCurrencyPair();
 
-        // Create the pool
         key = PoolKey(currency0, currency1, 3000, 60, IHooks(address(0)));
         nativeKey = PoolKey(Currency.wrap(address(0)), currency1, 3000, 60, IHooks(address(0)));
 
         poolManager.initialize(key, Constants.SQRT_PRICE_1_1);
         poolManager.initialize(nativeKey, Constants.SQRT_PRICE_1_1);
 
-        // full-range liquidity
         tickLower = TickMath.minUsableTick(key.tickSpacing);
         tickUpper = TickMath.maxUsableTick(key.tickSpacing);
     }
@@ -219,31 +217,4 @@ contract EasyPosmTest is Test, BaseTest {
         assertEq(delta.amount0(), -mintDelta.amount0() - 1 wei);
         assertEq(delta.amount1(), -mintDelta.amount1() - 1 wei);
     }
-
-    // This test requires a donateRouter, TODO
-    // function test_collect() public {
-    //     (uint256 tokenId,) = positionManager.mint(
-    //         key,
-    //         tickLower,
-    //         tickUpper,
-    //         100e18,
-    //         type(uint256).max,
-    //         type(uint256).max,
-    //         address(this),
-    //         block.timestamp + 1,
-    //         Constants.ZERO_BYTES
-    //     );
-
-    //     // donate to regenerate fee revenue
-    //     uint128 feeRevenue0 = 1e18;
-    //     uint128 feeRevenue1 = 0.1e18;
-
-    //     poolManager.donate(key, feeRevenue0, feeRevenue1, Constants.ZERO_BYTES);
-
-    //     // position collects half of the revenue since 50% of the liquidity is minted in setUp()
-    //     BalanceDelta delta =
-    //         positionManager.collect(tokenId, 0, 0, address(0x123), block.timestamp + 1, Constants.ZERO_BYTES);
-    //     assertEq(uint128(delta.amount0()), feeRevenue0 - 1 wei);
-    //     assertEq(uint128(delta.amount1()), feeRevenue1 - 1 wei);
-    // }
 }

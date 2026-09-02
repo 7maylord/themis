@@ -13,12 +13,6 @@ import {CurrencySettler} from "v4-core/test/utils/CurrencySettler.sol";
 
 import {IFairShareVault} from "./interfaces/IFairShareVault.sol";
 
-/// @title FairShareVault
-/// @notice Accrues two independent value streams and returns both to LPs:
-///   1. Risk premium diverted onchain by ThemisHook (native or ERC-20).
-///   2. Native-ETH MEV refunds paid directly to this address by Flashbots.
-/// Distribution uses poolManager.donate(), which credits in-range liquidity
-/// pro-rata through v4's own fee accounting — no shares, no claims, no snapshots.
 contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
     using PoolIdLibrary for PoolKey;
     using CurrencySettler for Currency;
@@ -34,7 +28,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
     mapping(PoolId => mapping(Currency => uint256)) public distributedForPool;
     mapping(Currency => uint256) public totalReceived;
 
-    /// @notice Native ETH received via receive() that has not yet been assigned to a pool.
     uint256 public unattributedEth;
 
     modifier onlyHook() {
@@ -46,9 +39,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         poolManager = _poolManager;
     }
 
-    // ─── Admin Setup ────────────────────────────────────────────────────────────
-
-    /// @notice Point vault to the deployed hook (callable exactly once after deployment).
     function setHook(address hook_) external onlyOwner {
         require(hook == address(0), "hook already set");
         require(hook_ != address(0), "hook cannot be zero address");
@@ -56,7 +46,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         emit HookSet(hook_);
     }
 
-    /// @notice Register a pool this vault will accrue and distribute value for.
     function registerPool(PoolId poolId, PoolKey calldata key) external onlyOwner {
         if (poolRegistered[poolId]) revert PoolAlreadyRegistered();
         poolRegistered[poolId] = true;
@@ -64,19 +53,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         emit PoolRegistered(poolId, key.currency0, key.currency1);
     }
 
-    // ─── Hook Interface ─────────────────────────────────────────────────────────
-
-    /// @notice Credit the pool's vault with diverted risk premium.
-    ///         Accounting only — the hook has already moved tokens into this
-    ///         contract via poolManager.take() before calling this function.
-    /// @dev For native ETH specifically, that take() call physically arrives via a
-    ///      raw `call{value}` (see Currency.transfer), which is the exact same
-    ///      mechanism receive() handles — so by the time credit() runs, this amount
-    ///      has already landed in unattributedEth and totalReceived once. Crediting
-    ///      it again there would double-count real ETH that only exists once; net
-    ///      it out of unattributedEth instead (mirrors attributeEth's same move),
-    ///      and skip totalReceived for the native case. ERC-20 has no such callback,
-    ///      so credit() remains the first and only place its total is recorded.
     function credit(PoolId poolId, Currency currency, uint256 amount) external onlyHook whenNotPaused {
         if (amount == 0) return;
         if (!poolRegistered[poolId]) revert PoolNotRegistered();
@@ -89,18 +65,12 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         emit FairShareCredited(poolId, currency, amount);
     }
 
-    // ─── Flashbots Refunds ──────────────────────────────────────────────────────
-
-    /// @notice Accepts native-ETH MEV refunds. Flashbots refund payouts carry no
-    ///         calldata, so the pool cannot be known at receipt time — see attributeEth.
     receive() external payable {
         unattributedEth += msg.value;
         totalReceived[CurrencyLibrary.ADDRESS_ZERO] += msg.value;
         emit FairShareReceived(msg.sender, msg.value);
     }
 
-    /// @notice Owner assigns previously-unattributed ETH to a pool once the
-    ///         off-chain indexer has matched the refund to its originating swap.
     function attributeEth(PoolId poolId, uint256 amount) external onlyOwner {
         if (!poolRegistered[poolId]) revert PoolNotRegistered();
         require(amount <= unattributedEth, "exceeds unattributed balance");
@@ -109,10 +79,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         emit EthAttributed(poolId, amount);
     }
 
-    // ─── Distribution ───────────────────────────────────────────────────────────
-
-    /// @notice Donates all pending value for a pool to its in-range LPs. Permissionless
-    ///         — anyone can trigger a distribution once value has accrued.
     function distribute(PoolId poolId) external nonReentrant whenNotPaused {
         if (!poolRegistered[poolId]) revert PoolNotRegistered();
         PoolKey memory key = _poolKey[poolId];
@@ -124,12 +90,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         pendingForPool[poolId][key.currency0] = 0;
         pendingForPool[poolId][key.currency1] = 0;
 
-        // unused-return: unlockCallback below always returns "" — nothing to check.
-        // reentrancy-benign: the state writes after this call are guarded by
-        // `nonReentrant`, and the only reentrant call this ever triggers is
-        // PoolManager invoking this same contract's own unlockCallback — not an
-        // arbitrary attacker-controlled path.
-        // slither-disable-next-line unused-return,reentrancy-benign
         poolManager.unlock(abi.encode(poolId, key, amount0, amount1));
 
         distributedForPool[poolId][key.currency0] += amount0;
@@ -142,9 +102,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
         (, PoolKey memory key, uint256 amount0, uint256 amount1) =
             abi.decode(rawData, (PoolId, PoolKey, uint256, uint256));
 
-        // Intentional: the returned BalanceDelta just mirrors amount0/amount1, which
-        // are already known — settle() below reverts on any mismatch anyway.
-        // slither-disable-next-line unused-return
         poolManager.donate(key, amount0, amount1, "");
 
         if (amount0 > 0) key.currency0.settle(poolManager, address(this), amount0, false);
@@ -152,8 +109,6 @@ contract FairShareVault is IFairShareVault, Ownable, Pausable, ReentrancyGuard {
 
         return "";
     }
-
-    // ─── Emergency ──────────────────────────────────────────────────────────────
 
     function pause() external onlyOwner {
         _pause();

@@ -20,9 +20,6 @@ import {ThemisRisk} from "./ThemisRisk.sol";
 import {FairShareVault} from "./FairShareVault.sol";
 import {IThemisHook} from "./interfaces/IThemisHook.sol";
 
-/// @title ThemisHook
-/// @notice Tracks per-pool MEV risk state via previewRisk, and diverts a risk-scaled
-///         premium from elevated-risk swaps into FairShareVault for LPs.
 contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     using StateLibrary for IPoolManager;
 
@@ -34,31 +31,16 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
     uint24 public maxPremiumPpm = 2500;
     uint256 public volFullScaleBps = 300;
     uint256 public sizeFullScaleBps = 500;
-    // Lower than a single large swap's own raw impact (deliberately — impact is now
-    // block-accumulated, and a split attack's EWMA-folded history sits well under a
-    // threshold tuned for one swap's raw move; this gives the folded signal room to
-    // register instead of reading as near-zero next to an already-saturated single swap).
+
     uint256 public impactFullScaleBps = 100;
-    // 5x a single swap's BPS(10000) sample: one swap doesn't saturate flow (leaves
-    // room to show it rising), but ~5 swaps in one block does (splitting defense).
+
     uint256 public flowFullScale = 50_000;
 
-    // Flow-intensity tuning (spec §9.7 swap-splitting resistance). Not owner-adjustable
-    // yet — Task 6 tunes these against the adversarial suite; add setters then if needed.
     uint256 internal constant FLOW_ALPHA_BPS = 3000;
     uint256 internal constant FLOW_DECAY_PER_BLOCK_BPS = 2000;
 
     uint256 internal constant SWAP_FEE_DENOMINATOR = 1_000_000;
 
-    // Volatility's EWMA is stored at this internal precision, not raw bps: once a
-    // raw-bps integer value shrinks into single digits (a calm pool, or several
-    // decay steps after a spike), any further update floors to 0 permanently
-    // regardless of the true fractional value — precision lost, not signal decayed.
-    // Scaling the internal representation up keeps rounding error negligible;
-    // normalize() only ever sees the descaled value. (Tried lowering alphaBps
-    // instead, to resist wash-trading specifically — reverted; see
-    // docs/THREAT_MODEL.md for why that doesn't work and this fix stands on its
-    // own as a general correctness improvement regardless.)
     uint256 internal constant VOL_PRECISION = 1e6;
 
     constructor(IPoolManager _poolManager, FairShareVault _vault, address owner_)
@@ -87,30 +69,17 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         });
     }
 
-    // ─── Views ──────────────────────────────────────────────────────────────────
-
     function getRiskState(PoolId poolId) external view returns (RiskState memory) {
         return _riskState[poolId];
     }
 
-    /// @notice Estimates risk for a proposed trade against current pool state.
-    /// @dev Forecasts the trade's own price move with a no-tick-crossing closed-form
-    ///      estimate (mirrors SwapMath's fee deduction before price movement). Impact
-    ///      and size are forecast through the same block-accumulator this swap would
-    ///      actually hit. Volatility compares against lastVolSqrtPrice instead of the
-    ///      estimate's own baseline — a DIFFERENT reference whenever volatility hasn't
-    ///      fired on the most recent swap — exactly mirroring _updateRiskState's own
-    ///      distinction between the two. Flow intensity uses current state since this
-    ///      swap's own arrival can't be foreseen; see test_previewRisk_* for the
-    ///      resulting tolerance.
     function previewRisk(PoolId poolId, bool zeroForOne, int256 amountSpecified)
         external
         view
         returns (uint32 riskScore, uint8 regime, uint24 premium)
     {
         RiskState memory st = _riskState[poolId];
-        // Intentional: tick and protocolFee aren't used by the risk math below.
-        // slither-disable-next-line unused-return
+
         (uint160 currentSqrtPrice,,, uint24 lpFee) = poolManager.getSlot0(poolId);
         uint128 liquidity = poolManager.getLiquidity(poolId);
 
@@ -154,11 +123,6 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         view
         returns (uint32)
     {
-        // Safe: lastVolSqrtPrice==0 is a deterministic "never initialized" sentinel
-        // (real prices are never 0), and block.number is a monotonic integer, not an
-        // attacker-manipulable balance — neither comparison is the dangerous kind
-        // this detector targets.
-        // slither-disable-next-line incorrect-equality
         if (st.lastVolSqrtPrice == 0 || block.number <= st.lastUpdatedBlock) {
             return st.volatilityScore;
         }
@@ -167,11 +131,6 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return ThemisRisk.normalize(newVolBps / VOL_PRECISION, volFullScaleBps);
     }
 
-    // ─── Swap lifecycle ─────────────────────────────────────────────────────────
-
-    /// @dev Not whenNotPaused: pausing stops value movement (the diversion below,
-    ///      gated on !paused() in _divertPremium), not risk telemetry. A paused hook
-    ///      must degrade to a vanilla pool, never brick swaps.
     function _afterSwap(
         address sender,
         PoolKey calldata key,
@@ -189,13 +148,6 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return (BaseHook.afterSwap.selector, hookDelta);
     }
 
-    /// @dev Split out to keep _afterSwap's stack shallow (this repo pins via_ir = false).
-    ///      Charges the risk premium in the swap's unspecified currency: less output
-    ///      on exact-input, more input on exact-output (see Hooks.afterSwap's
-    ///      `swapDelta = swapDelta - hookDelta`, which returning +premium exploits
-    ///      identically in both directions — no branch-specific sign flip needed).
-    ///      The router's amountOutMinimum/amountInMaximum still bounds the trader,
-    ///      so no separate slippage guard is needed here.
     function _divertPremium(
         PoolId poolId,
         PoolKey calldata key,
@@ -206,9 +158,7 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         if (paused()) return 0;
 
         uint24 ppm = ThemisRisk.premiumPpm(riskScore, maxPremiumPpm);
-        // Safe: ppm is a deterministic pure-function output (ThemisRisk.premiumPpm),
-        // not a manipulable balance — exact-zero is the correct "nothing to divert" check.
-        // slither-disable-next-line incorrect-equality
+
         if (ppm == 0) return 0;
 
         bool exactInput = params.amountSpecified < 0;
@@ -219,10 +169,7 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
 
         uint256 notional = unspecifiedDelta > 0 ? uint256(int256(unspecifiedDelta)) : uint256(-int256(unspecifiedDelta));
         uint256 premium = FullMath.mulDiv(notional, ppm, SWAP_FEE_DENOMINATOR);
-        // Safe: premium is deterministically computed above, not a manipulable
-        // balance — exact-zero (e.g. tiny notional rounding to 0) is the correct
-        // "nothing to divert" check, same as the ppm==0 guard above.
-        // slither-disable-next-line incorrect-equality
+
         if (premium == 0) return 0;
 
         emit RiskPremiumDiverted(poolId, premiumCurrency, premium, riskScore);
@@ -233,16 +180,12 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return int128(uint128(premium));
     }
 
-    /// @dev Split out of _afterSwap to keep the stack shallow enough for the
-    ///      non-IR compiler (this repo pins via_ir = false).
     function _updateRiskState(PoolId poolId, int256 amountSpecified)
         internal
         returns (uint32 newScore, uint8 newRegime)
     {
         RiskState memory st = _riskState[poolId];
 
-        // Intentional: tick, protocolFee, and lpFee aren't used by the risk math below.
-        // slither-disable-next-line unused-return
         (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolId);
         uint128 liquidity = poolManager.getLiquidity(poolId);
 
@@ -267,10 +210,6 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         emit RiskUpdated(poolId, previousScore, newScore, newRegime);
     }
 
-    /// @dev This swap's own realized move against the PER-SWAP baseline
-    ///      (priceReturnBps already returns 0 when st.lastSqrtPrice is 0 on the
-    ///      first-ever swap, no extra guard needed), block-accumulated like size so
-    ///      splitting a trade can't make each chunk's own tiny move erase the signal.
     function _updateImpact(RiskState memory st, uint160 sqrtPriceX96)
         internal
         view
@@ -284,20 +223,12 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return (st, impactScore);
     }
 
-    /// @dev EWMA against the PER-UPDATE baseline (lastVolSqrtPrice), capped to once
-    ///      per block (spec §9.7 spike-revert guard). Using lastSqrtPrice here instead
-    ///      would mean a once-per-block update only ever sees the single most recent
-    ///      swap's move — comparing against a baseline that only moves when volatility
-    ///      itself fires is what makes the sample capture the FULL cumulative move
-    ///      since the last update, whether that came from one swap or twenty.
     function _updateVolatility(RiskState memory st, PoolId poolId, uint160 sqrtPriceX96)
         internal
         returns (RiskState memory)
     {
-        // Safe: deterministic "never initialized" sentinel, see _forecastVolatilityScore.
-        // slither-disable-next-line incorrect-equality
         if (st.lastVolSqrtPrice == 0) {
-            st.lastVolSqrtPrice = sqrtPriceX96; // first-ever swap: establish baseline only
+            st.lastVolSqrtPrice = sqrtPriceX96;
             return st;
         }
         if (block.number > st.lastUpdatedBlock) {
@@ -312,10 +243,6 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return st;
     }
 
-    /// @dev priceReturnBps can (rarely) return type(uint256).max — see its own H-1
-    ///      overflow guard for extreme tick-range moves. Multiplying that by
-    ///      VOL_PRECISION would overflow and revert, reintroducing exactly the
-    ///      DoS risk that guard exists to prevent, so cap before scaling instead.
     function _scaleVolSample(uint256 rawBps) internal pure returns (uint256) {
         return rawBps > type(uint256).max / VOL_PRECISION ? type(uint256).max : rawBps * VOL_PRECISION;
     }
@@ -341,34 +268,15 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return (st, sizeScore);
     }
 
-    /// @dev Shared by flow (sample = constant BPS, a pure "a swap happened" signal —
-    ///      wash-trading resistance depends on a tiny swap counting for as much as a
-    ///      large one) and size (sample = this swap's own notional ratio — splitting
-    ///      resistance depends on small chunks summing back to the same total a
-    ///      single big swap would produce). Either way, a pure EWMA can't resist
-    ///      splitting: repeated samples converge toward the sample, not their sum —
-    ///      no alpha fixes that. So the sample is SUMMED within a block
-    ///      (blockBps) and only folded into the smoothed ewmaBps history at a block
-    ///      boundary — many chunks in one block correctly reads as high intensity,
-    ///      while cross-block manipulation still goes through the resistant EWMA fold.
-    /// @return newEwmaBps settled history, written to storage
-    /// @return newBlockBps this block's running total, written to storage
-    /// @return liveBps the larger of the two — what THIS swap's own score should use,
-    ///         so a mid-block accumulation is reflected immediately, not just next block
     function _nextBlockAccumulatedEwma(uint64 prevEwmaBps, uint64 prevBlockBps, uint64 lastUpdatedBlock, uint256 sample)
         internal
         view
         returns (uint64 newEwmaBps, uint64 newBlockBps, uint256 liveBps)
     {
-        // Safe: both are monotonic block-number/sentinel comparisons, not
-        // attacker-manipulable balances — see _forecastVolatilityScore above for
-        // the same reasoning, reused here for the block-accumulation pattern.
-        // slither-disable-next-line incorrect-equality
         if (lastUpdatedBlock == block.number) {
             newEwmaBps = prevEwmaBps;
             newBlockBps = uint64(_capToUint64(uint256(prevBlockBps) + sample));
         } else {
-            // slither-disable-next-line incorrect-equality
             uint256 gap = lastUpdatedBlock == 0 ? 0 : block.number - lastUpdatedBlock;
             uint256 decayed = gap <= 1
                 ? prevEwmaBps
@@ -384,20 +292,12 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         return v > type(uint64).max ? type(uint64).max : v;
     }
 
-    // ─── Internal risk math glue ────────────────────────────────────────────────
-
-    /// @dev Shared by size scoring and the flow accumulator so splitting a trade
-    ///      into many small pieces can't defeat either dimension on its own.
     function _notionalRatioBps(int256 amountSpecified, uint128 liquidity) internal pure returns (uint256) {
         if (liquidity == 0) return 0;
         uint256 absAmount = amountSpecified < 0 ? uint256(-amountSpecified) : uint256(amountSpecified);
         return FullMath.mulDiv(absAmount, ThemisRisk.BPS, liquidity);
     }
 
-    /// @dev No-tick-crossing closed-form estimate of the price a proposed trade would
-    ///      reach. Mirrors SwapMath.computeSwapStep's fee-before-price-movement order
-    ///      for exact input; exact output isn't fee-adjusted here either, matching
-    ///      SwapMath (fee is computed backward from amountOut, not before it).
     function _estimateNextSqrtPrice(
         uint160 currentSqrtPrice,
         uint128 liquidity,
@@ -416,8 +316,6 @@ contract ThemisHook is IThemisHook, BaseHook, Ownable, Pausable {
         }
         return SqrtPriceMath.getNextSqrtPriceFromOutput(currentSqrtPrice, liquidity, absAmount, zeroForOne);
     }
-
-    // ─── Owner configuration ────────────────────────────────────────────────────
 
     function setAlphaBps(uint256 v) external onlyOwner {
         require(v > 0 && v <= ThemisRisk.BPS, "alpha");

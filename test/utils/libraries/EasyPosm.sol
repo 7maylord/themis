@@ -9,16 +9,12 @@ import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {PositionInfo, PositionInfoLibrary} from "@uniswap/v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
-/// @title Easy Position Manager
-/// @notice A library for abstracting Position Manager calldata
-/// @dev Useable onchain, but expensive because of encoding
 library EasyPosm {
     using CurrencyLibrary for Currency;
     using SafeCast for uint256;
     using SafeCast for int256;
     using PositionInfoLibrary for PositionInfo;
 
-    /// @dev packing data to avoid stack too deep error
     struct MintData {
         uint256 balance0Before;
         uint256 balance1Before;
@@ -26,8 +22,6 @@ library EasyPosm {
         bytes actions;
     }
 
-    /// @dev This function supports sending native tokens (ETH), the amount-to-pay is determined by amount0Max.
-    ///      Any excess amount is NOT refunded since it is not encoding the SWEEP action
     function mint(
         IPositionManager posm,
         PoolKey memory poolKey,
@@ -59,7 +53,6 @@ library EasyPosm {
         mintData.params[2] = abi.encode(currency0, recipient);
         mintData.params[3] = abi.encode(currency1, recipient);
 
-        // Mint Liquidity
         tokenId = posm.nextTokenId();
         uint256 valueToPass = currency0.isAddressZero() ? amount0Max : 0;
         posm.modifyLiquidities{value: valueToPass}(abi.encode(mintData.actions, mintData.params), deadline);
@@ -147,7 +140,7 @@ library EasyPosm {
         (Currency currency0, Currency currency1) = getCurrencies(posm, tokenId);
 
         bytes[] memory params = new bytes[](2);
-        // collecting fees is achieved by decreasing liquidity with 0 liquidity removed
+
         params[0] = abi.encode(tokenId, 0, amount0Min, amount1Min, hookData);
         params[1] = abi.encode(currency0, currency1, recipient);
 

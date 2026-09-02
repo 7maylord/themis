@@ -17,17 +17,6 @@ import {V4PoolManagerDeployer} from "hookmate/artifacts/V4PoolManager.sol";
 import {V4PositionManagerDeployer} from "hookmate/artifacts/V4PositionManager.sol";
 import {V4RouterDeployer} from "hookmate/artifacts/V4Router.sol";
 
-/**
- * Base Deployer Contract for Hook Testing
- *
- * Automatically does the following:
- * 1. Setup deployments for Permit2, PoolManager, PositionManager and V4SwapRouter.
- * 2. Check if chainId is 31337, is so, deploys local instances.
- * 3. If not, uses existing canonical deployments on the selected network.
- * 4. Provides utility functions to deploy tokens and currency pairs.
- *
- * This contract can be used for both local testing and fork testing.
- */
 abstract contract Deployers {
     IPermit2 permit2;
     IPoolManager poolManager;
@@ -60,9 +49,7 @@ abstract contract Deployers {
     function deployPermit2() internal {
         address permit2Address = AddressConstants.getPermit2Address();
 
-        if (permit2Address.code.length > 0) {
-            // Permit2 is already deployed, no need to etch it.
-        } else {
+        if (permit2Address.code.length > 0) {} else {
             _etch(permit2Address, Permit2Deployer.deploy().code);
         }
 
@@ -102,7 +89,6 @@ abstract contract Deployers {
     }
 
     function deployArtifacts() internal {
-        // Order matters.
         deployPermit2();
         deployPoolManager();
         deployPositionManager();

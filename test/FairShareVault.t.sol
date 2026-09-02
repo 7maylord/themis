@@ -25,8 +25,8 @@ contract FairShareVaultTest is BaseTest {
 
     FairShareVault vault;
 
-    Currency currency0; // native ETH
-    Currency currency1; // ERC-20
+    Currency currency0;
+    Currency currency1;
 
     PoolKey poolKey;
     PoolId poolId;
@@ -45,7 +45,7 @@ contract FairShareVaultTest is BaseTest {
         currency1 = Currency.wrap(address(deployToken()));
 
         vault = new FairShareVault(poolManager, address(this));
-        vault.setHook(address(this)); // this test contract stands in for ThemisHook (Task 4/5)
+        vault.setHook(address(this));
 
         poolKey = PoolKey(currency0, currency1, FEE, TICK_SPACING, IHooks(address(0)));
         poolId = poolKey.toId();
@@ -76,8 +76,6 @@ contract FairShareVaultTest is BaseTest {
         );
     }
 
-    // ─── receive() ──────────────────────────────────────────────────────────────
-
     function test_receive_creditsUnattributedEth() public {
         vm.expectEmit(true, true, true, true, address(vault));
         emit IFairShareVault.FairShareReceived(address(this), 1 ether);
@@ -88,17 +86,10 @@ contract FairShareVaultTest is BaseTest {
         assertEq(vault.totalReceived(CurrencyLibrary.ADDRESS_ZERO), 1 ether);
     }
 
-    // ─── registerPool() ─────────────────────────────────────────────────────────
-
-    /// WHY: a re-registration could overwrite _poolKey with a different key while
-    /// pendingForPool/distributedForPool still hold value keyed to the OLD key's
-    /// currencies — silently orphaning funds distribute() can no longer reach.
     function test_registerPool_revertsOnDoubleRegistration() public {
         vm.expectRevert(IFairShareVault.PoolAlreadyRegistered.selector);
         vault.registerPool(poolId, poolKey);
     }
-
-    // ─── credit() ───────────────────────────────────────────────────────────────
 
     function test_credit_revertsForNonHook() public {
         vm.prank(address(0xBEEF));
@@ -119,14 +110,7 @@ contract FairShareVaultTest is BaseTest {
         assertEq(vault.totalReceived(currency1), 150);
     }
 
-    /// WHY: poolManager.take() for native currency physically arrives via a raw
-    /// call{value} (Currency.transfer), which triggers receive() exactly like any
-    /// other ETH transfer — before credit() ever runs. Found by
-    /// test/Themis.invariant.t.sol: crediting the native amount again on top of
-    /// what receive() already recorded double-counted real ETH that only exists once.
     function test_credit_nativeCurrency_doesNotDoubleCountWithReceive() public {
-        // Mirrors exactly what the hook's _divertPremium does: take() moves the
-        // ETH in first (receive() fires), then credit() records the attribution.
         (bool ok,) = address(vault).call{value: 1 ether}("");
         assertTrue(ok);
         assertEq(vault.unattributedEth(), 1 ether);
@@ -141,8 +125,6 @@ contract FairShareVaultTest is BaseTest {
         );
     }
 
-    // ─── attributeEth() ─────────────────────────────────────────────────────────
-
     function test_attributeEth_movesUnattributedToPool() public {
         (bool ok,) = address(vault).call{value: 1 ether}("");
         assertTrue(ok);
@@ -153,8 +135,6 @@ contract FairShareVaultTest is BaseTest {
         assertEq(vault.pendingForPool(poolId, CurrencyLibrary.ADDRESS_ZERO), 0.4 ether);
     }
 
-    /// WHY: prevents the owner attributing ETH the vault never received, which
-    /// would make distribute() pay one pool with another pool's donated value.
     function test_attributeEth_revertsAboveUnattributedBalance() public {
         (bool ok,) = address(vault).call{value: 1 ether}("");
         assertTrue(ok);
@@ -180,8 +160,6 @@ contract FairShareVaultTest is BaseTest {
         vm.expectRevert(IFairShareVault.PoolNotRegistered.selector);
         vault.attributeEth(otherKey.toId(), 0.1 ether);
     }
-
-    // ─── distribute() ───────────────────────────────────────────────────────────
 
     function test_distribute_isPermissionless() public {
         IERC20(Currency.unwrap(currency1)).transfer(address(vault), 10 ether);
@@ -211,15 +189,10 @@ contract FairShareVaultTest is BaseTest {
         vault.distribute(otherKey.toId());
     }
 
-    /// WHY: unlockCallback donates and settles using the vault's own balance —
-    /// if anyone could call it directly (not via a real poolManager.unlock()), they
-    /// could force arbitrary donate()/settle() calls against the vault's holdings.
     function test_unlockCallback_revertsForNonPoolManager() public {
         vm.expectRevert("not pool manager");
         vault.unlockCallback(abi.encode(poolId, poolKey, uint256(1), uint256(1)));
     }
-
-    // ─── pause() ────────────────────────────────────────────────────────────────
 
     function test_pause_blocksCreditAndDistribute() public {
         vault.pause();
@@ -242,8 +215,6 @@ contract FairShareVaultTest is BaseTest {
         vault.distribute(poolId);
         assertEq(vault.distributedForPool(poolId, currency1), 100);
     }
-
-    // ─── setHook() ──────────────────────────────────────────────────────────────
 
     function test_setHook_revertsOnSecondCall() public {
         vm.expectRevert("hook already set");

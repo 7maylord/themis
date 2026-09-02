@@ -10,14 +10,6 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 import {FairShareVault} from "../../src/FairShareVault.sol";
 
-/// @notice Medusa stateful fuzzing harness for FairShareVault accounting.
-///         Deliberately does not exercise distribute() — that needs a real, live v4
-///         pool with liquidity, already covered by
-///         test/Themis.invariant.t.sol:invariant_vaultAccountingNeverExceedsBalance
-///         against a real pool. This harness targets the accounting-only surface —
-///         credit, receive, attributeEth — where the native-currency double-count
-///         bug (poolManager.take()'s raw call to native ETH triggers receive(),
-///         which credit() then double-counted) was actually found.
 contract MedusaThemisVaultTest {
     using PoolIdLibrary for PoolKey;
 
@@ -44,11 +36,6 @@ contract MedusaThemisVaultTest {
         token.mint(address(this), MAX_SUPPLY);
     }
 
-    // ─── Handlers ──────────────────────────────────────────────────────────────
-
-    /// @dev Mirrors exactly what ThemisHook._divertPremium does for a native
-    ///      premium: send the ETH first — this IS what poolManager.take() does
-    ///      under the hood, a raw call that fires receive() — then credit().
     function handler_creditNative(uint96 amount) external {
         if (amount == 0 || amount > address(this).balance) return;
         (bool ok,) = address(vault).call{value: amount}("");
@@ -65,7 +52,6 @@ contract MedusaThemisVaultTest {
         totalTokenCredited += amount;
     }
 
-    /// @dev A refund arriving with no attribution — the case attributeEth exists for.
     function handler_sendUnattributedEth(uint96 amount) external {
         if (amount == 0 || amount > address(this).balance) return;
         (bool ok,) = address(vault).call{value: amount}("");
@@ -91,10 +77,6 @@ contract MedusaThemisVaultTest {
 
     receive() external payable {}
 
-    // ─── Properties ────────────────────────────────────────────────────────────
-
-    /// @dev The exact property that caught the double-counting bug: vault's
-    ///      accounting must never claim more native value than it physically holds.
     function property_nativeAccountingMatchesBalance() external view returns (bool) {
         return
             vault.pendingForPool(poolId, CurrencyLibrary.ADDRESS_ZERO) + vault.unattributedEth()

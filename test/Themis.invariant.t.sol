@@ -24,10 +24,6 @@ import {IThemisHook} from "../src/interfaces/IThemisHook.sol";
 import {FairShareVault} from "../src/FairShareVault.sol";
 import {ThemisRisk} from "../src/ThemisRisk.sol";
 
-/// @notice Bounded-action handler exercising ThemisHook + FairShareVault through a
-///         real v4 pool. Every action is wrapped in try/catch: invariant runs must
-///         survive occasional reverts (slippage, insufficient balance) without
-///         aborting the whole campaign — a revert is not itself a violation.
 contract ThemisHandler is Test {
     ThemisHook public hook;
     FairShareVault public vault;
@@ -135,12 +131,6 @@ contract ThemisInvariantTest is BaseTest {
     int24 constant TICK_SPACING = 10;
     uint256 constant LP_LIQUIDITY = 1_000e18;
 
-    // Params as of the last owner-set call the test itself made (only the setter
-    // calls this contract makes directly — the handler's own setter calls are
-    // exercised too, but ownership doesn't change, so both paths write the same
-    // owner-controlled slots; invariant_onlyOwnerChangedParams checks the values
-    // are always within the bounds those setters enforce, not a specific value).
-
     function setUp() public {
         deployArtifactsAndLabel();
 
@@ -185,13 +175,10 @@ contract ThemisInvariantTest is BaseTest {
         targetContract(address(handler));
     }
 
-    /// @dev Every pool's risk score is always in [0, 100].
     function invariant_riskScoreInDomain() public view {
         assertLe(hook.getRiskState(poolId).riskScore, 100);
     }
 
-    /// @dev Regime is always consistent with the score under the hysteresis bands —
-    ///      never RED below 60, never GREEN at or above 35.
     function invariant_regimeMatchesScoreBand() public view {
         IThemisHook.RiskState memory st = hook.getRiskState(poolId);
         if (st.regime == ThemisRisk.RED) {
@@ -202,8 +189,6 @@ contract ThemisInvariantTest is BaseTest {
         }
     }
 
-    /// WHY: this is the single accounting invariant that, if broken, lets one
-    /// pool's distribute() drain another's (or the vault pay out more than it holds).
     function invariant_vaultAccountingNeverExceedsBalance() public view {
         uint256 pendingNative = vault.pendingForPool(poolId, CurrencyLibrary.ADDRESS_ZERO);
         uint256 pendingToken = vault.pendingForPool(poolId, currency1);
@@ -221,22 +206,10 @@ contract ThemisInvariantTest is BaseTest {
         assertLe(vault.distributedForPool(poolId, currency1), totalToken);
     }
 
-    /// WHY: a nonzero residual hook delta bricks the unlock and takes the pool down.
-    /// v4-core itself already reverts the whole transaction if that ever happens —
-    /// deltas live in transient storage, cleared every transaction regardless, so
-    /// reading them between handler calls (as this invariant literally names) is not
-    /// meaningful. What's actually checkable from outside, and equivalent in
-    /// practice: the pool must still be able to execute an ordinary swap after any
-    /// sequence of handler actions. If the hook had ever left a bad delta, some
-    /// earlier handler call would already have reverted the whole invariant run.
     function invariant_hookNeverLeavesNonZeroDelta() public {
         swapRouter.swap{value: 1e12}(-1e12, 0, true, key, "", address(this), block.timestamp + 60);
     }
 
-    /// @dev Owner-gated parameters can only ever hold values their own setters
-    ///      would accept — the handler's setter calls use the same bounded setters
-    ///      as any other caller, so this is really "the setters' own require()s
-    ///      hold," verified from outside the contract on every state the campaign reaches.
     function invariant_onlyOwnerChangedParams() public view {
         assertLe(hook.alphaBps(), ThemisRisk.BPS);
         assertGt(hook.alphaBps(), 0);

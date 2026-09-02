@@ -6,14 +6,6 @@ import {console} from "forge-std/console.sol";
 
 import {BaseScript} from "./base/BaseScript.sol";
 
-/// @notice Executes a small GREEN-regime swap (native ETH -> TOKEN1) against the
-///         Themis pool, so ThemisHook records an onchain risk observation.
-///
-/// Requires in .env: TOKEN1_ADDRESS, THEMIS_HOOK_ADDRESS.
-///
-/// Usage:
-///   forge script script/02_Swap.s.sol \
-///     --rpc-url $SEPOLIA_RPC_URL --account themis-deployer --broadcast
 contract SwapScript is BaseScript {
     uint256 constant SWAP_AMOUNT_IN = 0.0001 ether;
 
@@ -25,7 +17,7 @@ contract SwapScript is BaseScript {
 
         swapRouter.swap{value: SWAP_AMOUNT_IN}({
             amountSpecified: -int256(SWAP_AMOUNT_IN),
-            amountLimit: 0, // exact-input: minimum acceptable output, 0 for this demo swap
+            amountLimit: 0,
             zeroForOne: true,
             poolKey: poolKey,
             hookData: "",

@@ -46,7 +46,6 @@ contract LiquidityHelpers is BaseScript {
     }
 
     function truncateTickSpacing(int24 tick, int24 tickSpacing) internal pure returns (int24) {
-        /// forge-lint: disable-next-line(divide-before-multiply)
         return ((tick / tickSpacing) * tickSpacing);
     }
 }
