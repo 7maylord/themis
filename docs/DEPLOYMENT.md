@@ -116,10 +116,38 @@ still needs to happen before it would be:
       (open, unresolved), though its symptom (a signature rejection) doesn't
       match ours (clean acceptance, no inclusion).
       <br><br>
-      **Why we believe this is Sepolia-specific, not a Themis bug** — three
-      independent, cited findings: (1) Flashbots' own testnet docs give this
-      exact explanation for non-inclusion: *"Flashbots only runs a small
-      portion of the validators on [testnet]"* (docs.flashbots.net/flashbots-auction/advanced/testnets).
+      **Update, 2026-09-02 — tested directly against real mainnet, and the
+      Sepolia-specific hypothesis below did not hold.** We'd reasoned (via
+      BuilderNet's real ~18.69% mainnet block-share, see the struck-through
+      analysis below) that mainnet should behave meaningfully better than
+      Sepolia. We then actually ran the same methodology against live mainnet:
+      a trivial self-transfer bundle, signed for real, submitted via
+      `eth_sendBundle` to `relay.flashbots.net`, targeting the next 50 real
+      mainnet blocks (25881918–25881967). Every submission was accepted
+      cleanly, same as Sepolia — and it landed in **none of the 50 targeted
+      blocks**. At an 18.69% true per-block win rate that outcome would occur
+      under 0.01% of the time by chance, so the earlier hypothesis is very
+      likely wrong, or at least incomplete. Two honest candidate explanations,
+      not distinguished by this test: (a) bundles submitted via this specific
+      legacy `eth_sendBundle`/`relay.flashbots.net` path may not actually feed
+      into BuilderNet's real block-winning capacity the way the market-share
+      number implied — this interface could be largely vestigial post-migration
+      regardless of what BuilderNet achieves through other paths; (b) the test
+      bundle had zero economic value (plain self-transfer, no incentive beyond
+      standard network fees) — on a real, busy mainnet block full of competing
+      fee-paying order flow, a valueless bundle has no reason to be
+      prioritized, unlike Sepolia's near-empty competition. Net effect: we can
+      no longer claim mainnet is reliably different via this pipeline — the
+      honest conclusion is this exact failure mode reproduces on mainnet too,
+      at least for a low/zero-value bundle. No funds were lost (failed bundles
+      are never broadcast; balance and nonce were unchanged before/after).
+      <br><br>
+      <details><summary>Original (now superseded) Sepolia-specific hypothesis, 2026-09-01</summary>
+
+      Three independent, cited findings suggested this was Sepolia-specific:
+      (1) Flashbots' own testnet docs give this exact explanation for
+      non-inclusion: *"Flashbots only runs a small portion of the validators
+      on [testnet]"* (docs.flashbots.net/flashbots-auction/advanced/testnets).
       (2) In Dec 2024 Flashbots deprecated its centralized mainnet builder
       entirely and migrated all bundle orderflow to **BuilderNet**, a
       decentralized block-building network — per live mainnet data
@@ -128,12 +156,11 @@ still needs to happen before it would be:
       builder), a real, actively-competitive share. (3) Flashbots' Sepolia docs
       make no mention of BuilderNet — Sepolia's `relay-sepolia.flashbots.net`
       appears to still run on the older, low-participation path mainnet moved
-      away from. Net effect: mainnet bundle orderflow is backed by
-      infrastructure with genuine, current validator reach; Sepolia's isn't —
-      a real, evidenced, structural gap, not just an assumption. This has
-      *not* been verified by an actual mainnet bundle test (that requires real
-      mainnet ETH and hasn't been run), so treat it as strong circumstantial
-      evidence, not proof.
+      away from. This reasoning was plausible but had not yet been tested
+      against real mainnet — see the update above for what an actual test
+      found.
+
+      </details>
 - [ ] **Real token pair economics.** The mainnet-fork simulation (`docs/ECONOMICS.md`)
       uses a fresh `MockERC20`, not an existing liquid pair — real trading behavior
       against genuine market depth and real MEV searcher competition has not been
