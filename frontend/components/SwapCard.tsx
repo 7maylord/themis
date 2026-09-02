@@ -105,10 +105,9 @@ function SwapCardInner() {
       {
         onSuccess: (hash) => {
           setLastTx({ hash, route })
-          // Record-keeping only — the wallet already submitted the tx itself
-          // (see docs/ARCHITECTURE.md for why a backend can't relay it: most
-          // wallets don't support sign-without-broadcast). Best-effort; a
-          // failed report here must never block or roll back a real swap.
+          // Record-keeping only — the wallet already submitted the tx itself.
+          // Best-effort; a failed report here must never block or roll back a
+          // real swap.
           fetch('/api/submissions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

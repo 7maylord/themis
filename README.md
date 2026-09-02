@@ -11,25 +11,22 @@ flow through Flashbots protection, and redirects captured value to LPs via
   FR-014) — `ThemisHook` scores risk and diverts a premium based on on-chain swap
   characteristics alone; it has no way to inspect how a transaction was submitted.
 - **FairShare has two sources, and only one is guaranteed.** An on-chain risk
-  premium charged to elevated-risk flow (unconditional, proven live — see
-  `docs/DEMO.md`), and Flashbots MEV refunds, which are variable, best-effort, and
-  never guaranteed — see `docs/ARCHITECTURE.md`'s two-value-streams section.
-- **Sepolia has no organic searcher market.** The live refund demonstration in
-  `docs/DEMO.md` uses a controlled bundle — the same account plays both the
-  "victim" and the "searcher" — explicitly labeled as such, not organic MEV.
+  premium charged to elevated-risk flow (unconditional, proven live), and
+  Flashbots MEV refunds, which are variable, best-effort, and never guaranteed.
+- **Sepolia has no organic searcher market.** The live refund demonstration
+  used a controlled bundle — the same account plays both the "victim" and the
+  "searcher" — explicitly labeled as such, not organic MEV.
 - **Every economics figure in this repo is a mainnet-fork simulation, not an
-  observed on-chain result.** `docs/ECONOMICS.md` and `data/economics.json` come
-  from `test/Economics.fork.t.sol` running synthetic, seeded scenarios against a
+  observed on-chain result.** `data/economics.json` comes from
+  `test/Economics.fork.t.sol` running synthetic, seeded scenarios against a
   forked mainnet — real infrastructure, synthetic trade flow.
-- **The contracts have not had an external audit.** Mainnet deployment is gated on
-  one — see `docs/DEPLOYMENT.md`'s pre-mainnet checklist for the full list of what
-  is and isn't done yet.
+- **The contracts have not had an external audit.** Mainnet deployment is
+  gated on one.
 
 ## Economics (mainnet-fork comparison)
 
 `test/Economics.fork.t.sol` compares Themis against a vanilla low-fee pool and
-a flat high-fee pool across five scenarios on a real mainnet fork. Full results
-and methodology: [`docs/ECONOMICS.md`](docs/ECONOMICS.md), raw data:
+a flat high-fee pool across five scenarios on a real mainnet fork. Raw data:
 [`data/economics.json`](data/economics.json).
 
 **The honest finding: Themis does not beat the flat high-fee baseline on raw LP
@@ -41,9 +38,7 @@ correctly detecting swap-splitting attacks that neither baseline can see at
 all. This simulation only measures Themis's on-chain-guaranteed value stream
 (the hook's own premium diversion) — it cannot exercise the live Flashbots
 MEV-refund stream that's the other half of the design, since that requires
-real relay infrastructure a Foundry fork test can't reach. See
-`docs/ECONOMICS.md` for the full breakdown and why this isn't being retuned
-away.
+real relay infrastructure a Foundry fork test can't reach.
 
 ## Foundry
 
@@ -94,8 +89,9 @@ $ anvil
 
 ### Deploy
 
-See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the actual Themis deployment
-sequence (`script/00_DeployThemis.s.sol` onward) and the current Sepolia addresses.
+Themis's own deployment sequence runs `script/00_DeployThemis.s.sol` onward
+(see `script/`); current Sepolia addresses are in
+[`deployments/11155111.json`](deployments/11155111.json).
 
 ### Cast
 

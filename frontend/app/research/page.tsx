@@ -26,7 +26,7 @@ export default function ResearchPage() {
     <main className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-16">
       <div>
         <h1 className="text-2xl font-semibold">Research Dashboard</h1>
-        <p className="text-sm text-white/60">Mainnet-fork economics comparison — see docs/ECONOMICS.md</p>
+        <p className="text-sm text-white/60">Mainnet-fork economics comparison</p>
       </div>
       <ResearchDashboard records={records} />
     </main>

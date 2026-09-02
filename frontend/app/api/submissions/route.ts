@@ -4,22 +4,18 @@ import { sepolia } from 'viem/chains'
 
 import { insertSubmission, listSubmissions, markFailed, markIncluded, type SubmissionInput } from '@/lib/db'
 
-// This route is the record-keeping half of Task 9 Step 5's revised design: the
-// wallet still submits the transaction directly (MetaMask and most wallets
-// don't support eth_signTransaction — signing without broadcasting — so a
-// backend can't literally relay the signed tx on the trader's behalf; see
-// docs/ARCHITECTURE.md). What a backend *can* do is record what happened once
-// the frontend knows it, closing the "private transaction status stored" gap
-// with real data instead of /pool's risk-classification proxy.
+// Record-keeping only: the wallet submits the transaction directly (most
+// wallets don't support signing without broadcasting, so a backend can't
+// literally relay it). This records what happened once the frontend knows it.
 //
 // Deliberately unauthenticated: there is no user-account/session system in this
 // app to authenticate against, and this endpoint only ever affects the
 // dashboard's *display* — it cannot move funds, and the real on-chain events
 // (RiskPremiumDiverted, ThemisSwapObserved) remain the authoritative source for
-// anything economically meaningful (see docs/THREAT_MODEL.md §26.5). The
-// mitigations below (strict input validation, rate limiting, bounded RPC
-// fan-out) exist to keep that display-only surface from being trivially
-// spammable or used to hammer the upstream RPC provider.
+// anything economically meaningful. The mitigations below (strict input
+// validation, rate limiting, bounded RPC fan-out) exist to keep that
+// display-only surface from being trivially spammable or used to hammer the
+// upstream RPC provider.
 
 // Falls back to a known-reliable public endpoint if SEPOLIA_RPC_URL isn't set —
 // http(undefined) would otherwise silently use viem's bundled default RPC,

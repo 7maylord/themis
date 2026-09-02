@@ -59,7 +59,7 @@ export function ResearchDashboard({ records }: { records: EconomicsRecord[] }) {
       <p className="text-xs text-white/50">
         No &quot;Dynamic-fee baseline&quot; column — that comparison pool is marked optional in the spec (§24.1) and
         wasn&apos;t built. &quot;Avg. slippage&quot; isn&apos;t reported separately — the simulation combines fee and
-        slippage into a single execution-cost figure (see docs/ECONOMICS.md); &quot;MEV leakage&quot; wasn&apos;t
+        slippage into a single execution-cost figure; &quot;MEV leakage&quot; wasn&apos;t
         separately measured either, since isolating attacker profit from LVR would require data this dataset doesn&apos;t
         capture. Both are omitted rather than estimated.
       </p>
