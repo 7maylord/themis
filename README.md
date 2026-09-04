@@ -9,7 +9,7 @@ Built for Atrium Academy UHI10 — Sustainable Liquidity & MEV Protection — as
 adaptive fair-flow layer for Uniswap v4: it keeps fees low in normal markets,
 routes MEV-sensitive swaps through protected order flow, and redirects
 captured backrun value to LPs through `FairShareVault`. Deployed live on
-Ethereum Sepolia. See `themis-prd-trd.md` for the full spec.
+Ethereum Sepolia.
 
 > Instead of making every trader pay higher fees to compensate LPs for MEV,
 > make recaptured MEV help pay the LPs.
@@ -106,6 +106,91 @@ all. This simulation only measures Themis's on-chain-guaranteed value stream
 MEV-refund stream that's the other half of the design, since that requires
 real relay infrastructure a Foundry fork test can't reach.
 
+## Setup
+
+**Prerequisites:** [Foundry](https://book.getfoundry.sh/getting-started/installation),
+Node.js 22, [pnpm](https://pnpm.io).
+
+```shell
+git clone --recursive <this repo>
+cd themis
+cp .env.example .env   # fill in SEPOLIA_RPC_URL and PRIVATE_KEY at minimum
+forge build
+forge test
+```
+
+If you cloned without `--recursive`, run `git submodule update --init --recursive`
+to pull in `lib/` (Foundry dependencies are git submodules, not npm packages).
+
+`.env.example` documents every variable this repo reads — network RPC URLs, the
+deployer key, Flashbots endpoints, contract addresses (filled in after
+deploying), and the frontend's `NEXT_PUBLIC_*` vars. One thing worth knowing
+up front: **Next.js only reads env files inside `frontend/`, not this root
+`.env`** — see the note directly above `NEXT_PUBLIC_API_URL` in
+`.env.example` for what to copy where.
+
+## Deploying from scratch
+
+Scripts run in this order (`script/`), each reading its inputs from `.env`:
+
+1. **`DeployTestToken.s.sol`** — deploys a fresh `MockERC20` test token, mints
+   10,000,000 to the deployer. Only needed on a testnet; a real mainnet
+   deployment would pair against an existing token instead.
+2. **`00_DeployThemis.s.sol`** — deploys `FairShareVault`, mines the hook's
+   CREATE2 salt via `HookMiner` for the exact required permission bitmap,
+   deploys `ThemisHook`, and independently re-asserts the deployed bitmap
+   rather than trusting the miner. Calls `vault.setHook(address(hook))`.
+3. **`01_CreatePoolAndAddLiquidity.s.sol`** — initializes the pool at 1:1,
+   adds full-range liquidity, registers the pool with the vault.
+4. **`02_Swap.s.sol`** — executes a small GREEN-regime swap as a smoke test
+   that the hook fires correctly (`ThemisSwapObserved` should show
+   `regime = 0`).
+5. **`03_Distribute.s.sol`** — triggers `vault.distribute(poolId)`, donating
+   any accrued value to LPs. Permissionless — anyone can call this once value
+   has accrued, not just the deployer.
+
+Update `.env`'s `THEMIS_HOOK_ADDRESS` / `FAIR_SHARE_VAULT_ADDRESS` /
+`TOKEN1_ADDRESS` / `POOL_ID` after each step, in order — later scripts read
+them back out.
+
+**Dry-run locally first**, against an Anvil fork:
+
+```shell
+anvil --fork-url $SEPOLIA_RPC_URL --block-time 1 &
+forge script script/00_DeployThemis.s.sol --rpc-url http://localhost:8545 \
+  --private-key <anvil-default-key> --broadcast --timeout 120
+# repeat for 01, 02, 03
+```
+
+Always pass `--timeout <seconds>` for local dry runs — `forge script
+--broadcast` against a local fork has been observed to hang indefinitely
+after logging success, and while hung has drained the account's ETH via an
+effect never fully root-caused. `--timeout 120` reliably prevents this.
+
+**Real deployment**, same scripts pointed at a real RPC and funded key:
+
+```shell
+forge script script/00_DeployThemis.s.sol \
+  --rpc-url $SEPOLIA_RPC_URL --private-key $PRIVATE_KEY --broadcast --timeout 120
+```
+
+Current Sepolia addresses (from the actual deployment) are in
+[`deployments/11155111.json`](deployments/11155111.json), generated from the
+broadcast log — never hand-write this file.
+
+## Running the frontend
+
+```shell
+cd frontend
+pnpm install
+cp .env.example .env.local   # set NEXT_PUBLIC_PRIVY_APP_ID at minimum —
+                              # get one free at https://dashboard.privy.io
+pnpm dev
+```
+
+Without `NEXT_PUBLIC_PRIVY_APP_ID` set, the app still runs — wallet
+connection just renders disabled rather than crashing the rest of the site.
+
 ## Foundry
 
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
@@ -117,58 +202,14 @@ Foundry consists of:
 - **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
 - **Chisel**: Fast, utilitarian, and verbose solidity REPL.
 
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
+Docs: https://book.getfoundry.sh/
 
 ```shell
-$ forge build
-```
-
-### Test
-
-```shell
-$ forge test
-```
-
-### Format
-
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-Themis's own deployment sequence runs `script/00_DeployThemis.s.sol` onward
-(see `script/`); current Sepolia addresses are in
-[`deployments/11155111.json`](deployments/11155111.json).
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+forge build          # compile
+forge test            # run tests
+forge fmt              # format
+forge snapshot        # gas snapshots
+anvil                    # local node
+cast <subcommand>    # chain/contract interaction
+forge --help / anvil --help / cast --help
 ```
